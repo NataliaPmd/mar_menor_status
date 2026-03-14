@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mar Menor Status</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f8fafc;
+      color: #1e293b;
+      line-height: 1.6;
+    }
+
+    header {
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 2rem 1.5rem 1.5rem;
+    }
+    header h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    header h1 span {
+      color: #38bdf8;
+    }
+    #last-updated {
+      margin-top: 0.4rem;
+      font-size: 0.875rem;
+      color: #94a3b8;
+    }
+
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+      display: grid;
+      gap: 2.5rem;
+    }
+
+    .chart-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .chart-card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #64748b;
+      margin-bottom: 1rem;
+    }
+    .chart-card canvas {
+      max-height: 260px;
+    }
+    .chart-card p {
+      margin-top: 1rem;
+      font-size: 0.875rem;
+      color: #475569;
+      border-left: 3px solid #e2e8f0;
+      padding-left: 0.75rem;
+    }
+
+    footer {
+      text-align: center;
+      padding: 2rem 1.5rem;
+      font-size: 0.8rem;
+      color: #94a3b8;
+    }
+    footer a { color: #64748b; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Mar Menor <span>Status</span></h1>
+  <p id="last-updated">Loading data…</p>
+</header>
+
+<main>
+  <div class="chart-card">
+    <h2>Chlorophyll (µg/L)</h2>
+    <canvas id="chart-chlorophyll"></canvas>
+    <p>Chlorophyll indicates how many algae are present in the water.
+       High values mean algae are proliferating, which can deplete oxygen
+       and damage the ecosystem. The red line marks the risk threshold: 2 µg/L.</p>
+  </div>
+
+  <div class="chart-card">
+    <h2>Dissolved Oxygen (mg/L)</h2>
+    <canvas id="chart-oxygen"></canvas>
+    <p>Fish and marine life need dissolved oxygen to survive.
+       Below 3 mg/L, suffocation events can occur and species begin to die off.
+       The red line shows this critical limit.</p>
+  </div>
+
+  <div class="chart-card">
+    <h2>Water Transparency (m)</h2>
+    <canvas id="chart-transparency"></canvas>
+    <p>The more transparent the water, the healthier the lagoon.
+       When algae or suspended sediments accumulate, water becomes murky
+       and sunlight cannot reach the bottom, harming seagrass.</p>
+  </div>
+
+  <div class="chart-card">
+    <h2>Rambla del Albujón Flow (l/s)</h2>
+    <canvas id="chart-flow"></canvas>
+    <p>The Rambla del Albujón is the main channel through which agricultural
+       nutrients enter Mar Menor. High flow after rainfall carries nitrates and
+       phosphates that feed algae blooms.</p>
+  </div>
+</main>
+
+<footer>
+  Data sources:
+  <a href="https://canalmarmenor.carm.es" target="_blank" rel="noopener">Canal Mar Menor (CARM)</a>,
+  IMIDA weekly reports &nbsp;|&nbsp;
+  License: <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>
+  &nbsp;|&nbsp;
+  Updated automatically every Monday
+</footer>
+
+<script>
+  // ─── Data store ───────────────────────────────────────────────────────────
+  const store = { params: null, aforos: null };
+
+  function tryRender() {
+    if (store.params !== null && store.aforos !== null) renderCharts();
+  }
+
+  // ─── Load CSVs ────────────────────────────────────────────────────────────
+  Papa.parse("datos/parametros.csv", {
+    download: true,
+    header: true,
+    skipEmptyLines: true,
+    complete: ({ data }) => { store.params = data; tryRender(); },
+    error: (err) => {
+      document.getElementById("last-updated").textContent = "Error loading parameter data.";
+      console.error("parametros.csv:", err);
+    },
+  });
+
+  Papa.parse("datos/aforos.csv", {
+    download: true,
+    header: true,
+    skipEmptyLines: true,
+    complete: ({ data }) => { store.aforos = data; tryRender(); },
+    error: (err) => {
+      console.error("aforos.csv:", err);
+      store.aforos = [];
+      tryRender();
+    },
+  });
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+
+  function toNum(v) {
+    const n = parseFloat(v);
+    return isNaN(n) ? null : n;
+  }
+
+  function threshold(dates, value) {
+    // Returns a flat array for a dashed threshold line at y=value
+    return dates.map(() => value);
+  }
+
+  function makeChart(id, label, dates, values, color, thresholdValue = null) {
+    const datasets = [
+      {
+        label,
+        data: values,
+        borderColor: color,
+        backgroundColor: color + "22",
+        borderWidth: 2,
+        pointRadius: 3,
+        tension: 0.3,
+        fill: false,
+        spanGaps: true,
+      },
+    ];
+
+    if (thresholdValue !== null) {
+      datasets.push({
+        label: `Threshold (${thresholdValue})`,
+        data: threshold(dates, thresholdValue),
+        borderColor: "#ef4444",
+        borderWidth: 1.5,
+        borderDash: [6, 4],
+        pointRadius: 0,
+        fill: false,
+      });
+    }
+
+    new Chart(document.getElementById(id), {
+      type: "line",
+      data: { labels: dates, datasets },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: { mode: "index", intersect: false },
+        },
+        scales: {
+          x: {
+            ticks: {
+              maxTicksLimit: 10,
+              maxRotation: 0,
+            },
+          },
+          y: { beginAtZero: false },
+        },
+      },
+    });
+  }
+
+  // ─── Render all charts ────────────────────────────────────────────────────
+
+  function renderCharts() {
+    const params  = store.params;
+    const aforos  = store.aforos;
+
+    // Filter by source (prefer 'cdg' and 'imida' over 'html' for time series)
+    const lagoon = params.filter(r => r.fuente !== "html");
+    const lagoonDates = lagoon.map(r => r.fecha);
+
+    makeChart(
+      "chart-chlorophyll",
+      "Chlorophyll (µg/L)",
+      lagoonDates,
+      lagoon.map(r => toNum(r.clorofila_ug_l)),
+      "#22c55e",
+      2,
+    );
+
+    makeChart(
+      "chart-oxygen",
+      "Dissolved Oxygen (mg/L)",
+      lagoonDates,
+      lagoon.map(r => toNum(r.oxigeno_mg_l)),
+      "#3b82f6",
+      3,
+    );
+
+    makeChart(
+      "chart-transparency",
+      "Transparency (m)",
+      lagoonDates,
+      lagoon.map(r => toNum(r.transparencia_m)),
+      "#06b6d4",
+    );
+
+    makeChart(
+      "chart-flow",
+      "Flow (l/s)",
+      aforos.map(r => r.fecha),
+      aforos.map(r => toNum(r.caudal_l_s)),
+      "#f97316",
+    );
+
+    // Last updated: most recent date across both datasets
+    const allDates = [
+      ...lagoonDates,
+      ...aforos.map(r => r.fecha),
+    ].filter(Boolean).sort();
+
+    const lastDate = allDates[allDates.length - 1] ?? "unknown";
+    document.getElementById("last-updated").textContent =
+      `Last updated: ${lastDate}`;
+  }
+</script>
+</body>
+</html>
