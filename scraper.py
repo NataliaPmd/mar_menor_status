@@ -179,8 +179,17 @@ def seed_from_csv(conn: sqlite3.Connection):
 def scrape_html_table(conn: sqlite3.Connection) -> dict:
     """Scrape the most recent parameter values from the HTML monitoring page.
 
-    The page uses CSS Flexbox/Grid layout — there is no <table> element.
-    We walk the DOM looking for parameter name + value pairs.
+    The page shows a comparison table: same 4 dates for year1 (e.g. 2026)
+    and year2 (e.g. 2025). For each parameter the text layout is:
+
+        [param name]
+        [date1] [date2] [date3] [date4]   <- 4 dates, year1
+        [val1]  [val2]  [val3]  [val4]    <- 4 values, year1 ('-' = missing)
+        [date1] [date2] [date3] [date4]   <- same dates, year2
+        [val1]  [val2]  [val3]  [val4]    <- 4 values, year2
+
+    We parse the raw page text line by line to extract this structure.
+    Stale html records are deleted before inserting fresh ones.
     """
     url = "https://canalmarmenor.carm.es/monitorizacion/monitorizacion-de-parametros/"
     log.info("[html] Fetching %s", url)
@@ -189,60 +198,122 @@ def scrape_html_table(conn: sqlite3.Connection) -> dict:
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "lxml")
 
-    today_year = date.today().year
+    lines = [l.strip() for l in soup.get_text(separator="\n").splitlines() if l.strip()]
 
-    # Collect all text nodes in the page to find parameter/value pairs.
-    # The page layout places parameter names and values in sibling divs
-    # within a shared flex/grid container.
-    # Strategy: look for containers that hold a known parameter name,
-    # then extract all date+value pairs from the same container.
+    PARAM_MAP = {
+        "transparencia": "transparencia_m",
+        "turbidez":      "turbidez_ftu",
+        "clorofila":     "clorofila_ug_l",
+        "temperatura":   "temperatura",
+        "salinidad":     "salinidad",
+        "oxígeno":       "oxigeno_mg_l",
+        "oxigeno":       "oxigeno_mg_l",
+    }
+    DATE_RE  = re.compile(r"^\d{1,2}\s+[a-záéíóú]{3}$", re.IGNORECASE)
+    VALUE_RE = re.compile(r"^-$|^\d+[,.]?\d*$")
+    YEAR_RE  = re.compile(r"^20\d{2}$")
 
-    inserted = 0
+    # Locate the monitoring data section
+    start_idx = next(
+        (i for i, l in enumerate(lines) if "últimos datos" in l.lower()), None
+    )
+    if start_idx is None:
+        raise RuntimeError("Could not find 'Últimos datos' section in the HTML page")
 
-    # Find all elements whose text matches a known parameter name
-    for param_es, col_name in PARAM_KEYWORDS.items():
-        # Search for an element with this parameter keyword
-        elements = soup.find_all(string=re.compile(param_es, re.IGNORECASE))
-        for el in elements:
-            parent = el.parent
-            if parent is None:
-                continue
-            # Walk up to a container that also holds date and value siblings
-            container = parent.find_parent(
-                lambda tag: tag.name in ("div", "section")
-                and len(tag.find_all(string=re.compile(r"\d{1,2}\s+\w{3}", re.I))) > 0
-            )
-            if container is None:
-                continue
+    # Extract year1 and year2 from the header block
+    year1 = year2 = None
+    for line in lines[start_idx: start_idx + 15]:
+        if YEAR_RE.match(line):
+            if year1 is None:
+                year1 = int(line)
+            elif year2 is None:
+                year2 = int(line)
+                break
+    year1 = year1 or date.today().year
+    year2 = year2 or (year1 - 1)
 
-            # Extract date strings and numeric value strings from the container
-            date_strings = container.find_all(
-                string=re.compile(r"^\s*\d{1,2}\s+[a-záéíóúñ]{3}\s*$", re.IGNORECASE)
-            )
-            value_strings = container.find_all(
-                string=re.compile(r"^\s*\d[\d,\.]*\s*$")
-            )
-
-            for d_str, v_str in zip(date_strings, value_strings):
-                iso_date = spanish_date_to_iso(d_str.strip(), today_year)
-                value    = parse_float(v_str.strip())
-                if iso_date is None or value is None:
-                    continue
-
-                # Ensure a row exists for this (fecha, fuente) pair
-                conn.execute(
-                    "INSERT OR IGNORE INTO parametros_laguna (fecha, fuente) VALUES (?, 'html')",
-                    (iso_date,),
-                )
-                conn.execute(
-                    f"UPDATE parametros_laguna SET {col_name} = ? WHERE fecha = ? AND fuente = 'html' AND {col_name} IS NULL",
-                    (value, iso_date),
-                )
-                inserted += 1
-            break  # stop after first matching container per parameter
-
+    # Remove stale html records so values don't accumulate incorrectly
+    conn.execute("DELETE FROM parametros_laguna WHERE fuente = 'html'")
     conn.commit()
-    log.info("[html] Inserted/updated %d parameter values", inserted)
+
+    def _flush(col, dates, values, year):
+        """Insert (date, value) pairs for a single parameter/zone."""
+        count = 0
+        for d_str, v_str in zip(dates, values):
+            iso = spanish_date_to_iso(d_str, year)
+            val = parse_float(v_str)          # '-' returns None
+            if iso is None or val is None:
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO parametros_laguna (fecha, fuente) VALUES (?, 'html')",
+                (iso,),
+            )
+            conn.execute(
+                f"UPDATE parametros_laguna SET {col} = ? "
+                f"WHERE fecha = ? AND fuente = 'html' AND {col} IS NULL",
+                (val, iso),
+            )
+            count += 1
+        return count
+
+    inserted   = 0
+    col_name   = None
+    dates1: list = []
+    values1: list = []
+    dates2: list = []
+    values2: list = []
+    # zone: 1 = collecting year1 data, 2 = collecting year2 data
+    zone = 0
+
+    for line in lines[start_idx:]:
+        # Detect parameter name (must contain a known keyword + unit in parentheses)
+        matched_col = None
+        line_lower = line.lower()
+        if "(" in line or "ºc" in line_lower:
+            for keyword, col in PARAM_MAP.items():
+                if keyword in line_lower:
+                    matched_col = col
+                    break
+
+        if matched_col:
+            # Flush the previous parameter before starting a new one
+            if col_name:
+                inserted += _flush(col_name, dates1, values1, year1)
+                inserted += _flush(col_name, dates2, values2, year2)
+                conn.commit()
+            col_name = matched_col
+            dates1, values1, dates2, values2 = [], [], [], []
+            zone = 1
+            continue
+
+        if col_name == 0:
+            continue  # not yet inside a parameter block
+
+        if line == "Todos los datos":
+            break   # end of monitoring section
+
+        if DATE_RE.match(line):
+            if zone == 1 and len(dates1) < 4:
+                dates1.append(line)
+            elif zone == 2 and len(dates2) < 4:
+                dates2.append(line)
+
+        elif VALUE_RE.match(line):
+            if zone == 1 and len(values1) < 4:
+                values1.append(line)
+                # After 4 values for zone 1, move to zone 2
+                if len(values1) == 4:
+                    zone = 2
+            elif zone == 2 and len(values2) < 4:
+                values2.append(line)
+
+    # Flush the last parameter
+    if col_name:
+        inserted += _flush(col_name, dates1, values1, year1)
+        inserted += _flush(col_name, dates2, values2, year2)
+        conn.commit()
+
+    log.info("[html] Inserted %d parameter values (year1=%d, year2=%d)", inserted, year1, year2)
     return {"source": "html", "new_records": inserted, "error": None}
 
 
@@ -360,10 +431,91 @@ def scrape_imida_pdfs(conn: sqlite3.Connection) -> dict:
     return {"source": "imida", "new_records": total_inserted, "error": None}
 
 
-# ─── Source 4: Albujón flow PDFs ──────────────────────────────────────────────
+# ─── Source 4 (bis): UPCT historical CSVs ────────────────────────────────────
+
+# Maps UPCT variable names to DB column names.
+# Transparencia values are stored as negative depths; we take abs().
+UPCT_VARS = {
+    "Transparencia": ("transparencia_m",  True),   # (col, negate)
+    "Clorofila":     ("clorofila_ug_l",   False),
+    "Oxigeno":       ("oxigeno_mg_l",     False),
+    "Temperatura":   ("temperatura",      False),
+    "Salinidad":     ("salinidad",        False),
+    "Turbidez":      ("turbidez_ftu",     False),
+}
+UPCT_BASE = "https://marmenor.upct.es/thredds/fileServer/L4/{var}.csv"
+
+
+def scrape_upct_csvs(conn: sqlite3.Connection) -> dict:
+    """Download UPCT historical parameter CSVs (2016–2024).
+
+    Each variable is a separate CSV with columns: Fecha, Medias, Desviaciones.
+    Dates use YYYY/MM/DD format. Transparency values are negative depths;
+    we store abs(value). Existing records are not overwritten (INSERT OR IGNORE).
+    """
+    total_inserted = 0
+
+    for var_name, (col_name, negate) in UPCT_VARS.items():
+        url = UPCT_BASE.format(var=var_name)
+        log.info("[upct] Downloading %s", url)
+
+        try:
+            resp = requests.get(url, timeout=60)
+            resp.raise_for_status()
+        except requests.RequestException as e:
+            log.warning("[upct] Failed to download %s: %s", url, e)
+            continue
+
+        inserted = 0
+        for line in resp.text.splitlines()[1:]:   # skip header
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(",")
+            if len(parts) < 2:
+                continue
+            raw_date, raw_val = parts[0].strip(), parts[1].strip()
+
+            # Normalise date: YYYY/MM/DD or YYYY/M/D → YYYY-MM-DD
+            try:
+                d = datetime.strptime(raw_date, "%Y/%m/%d")
+                iso_date = d.strftime("%Y-%m-%d")
+            except ValueError:
+                try:
+                    d = datetime.strptime(raw_date, "%Y/%m/%d")
+                    iso_date = d.strftime("%Y-%m-%d")
+                except ValueError:
+                    log.debug("[upct] Unparseable date: %r", raw_date)
+                    continue
+
+            val = parse_float(raw_val)
+            if val is None:
+                continue
+            if negate:
+                val = abs(val)          # negative depth → positive metres
+
+            conn.execute(
+                "INSERT OR IGNORE INTO parametros_laguna (fecha, fuente) VALUES (?, 'upct')",
+                (iso_date,),
+            )
+            rows = conn.execute(
+                f"UPDATE parametros_laguna SET {col_name} = ? "
+                f"WHERE fecha = ? AND fuente = 'upct' AND {col_name} IS NULL",
+                (val, iso_date),
+            ).rowcount
+            inserted += rows
+
+        conn.commit()
+        log.info("[upct] %s: %d new values", var_name, inserted)
+        total_inserted += inserted
+
+    return {"source": "upct", "new_records": total_inserted, "error": None}
+
+
+# ─── Source 5: Albujón flow PDFs ──────────────────────────────────────────────
 
 def scrape_aforos_pdfs(conn: sqlite3.Connection) -> dict:
-    """Scrape and parse Rambla del Albujón flow/nutrient PDFs.
+    """Scrape and parse Rambla del Albujón nitrate lab PDFs.
 
     The aforos page lists PDFs with pattern DD_MM_YYYY.pdf (some have -1 suffix).
     """
@@ -482,12 +634,13 @@ def _parse_imida_pdf(conn: sqlite3.Connection, pdf_path: Path, report_date: str)
     """
     # Maps substrings in the header row to DB column names
     IMIDA_COLS = {
-        "temp":       "temperatura",
-        "turbidez":   "turbidez_ftu",
-        "oxígeno":    "oxigeno_mg_l",
-        "oxigeno":    "oxigeno_mg_l",
-        "clorofila":  "clorofila_ug_l",
-        "salinidad":  "salinidad",
+        "temp":          "temperatura",
+        "turbidez":      "turbidez_ftu",
+        "oxígeno":       "oxigeno_mg_l",
+        "oxigeno":       "oxigeno_mg_l",
+        "clorofila":     "clorofila_ug_l",
+        "salinidad":     "salinidad",
+        "transparencia": "transparencia_m",
     }
 
     row_data = {}
@@ -669,6 +822,7 @@ def main():
 
     # Run each scraper independently; failures do not abort the others
     scrapers = [
+        ("upct",   scrape_upct_csvs),     # historical 2016–2024 (run first so newer sources can overwrite)
         ("html",   scrape_html_table),
         ("cdg",    scrape_cdg_pdf),
         ("imida",  scrape_imida_pdfs),
