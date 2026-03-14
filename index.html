@@ -164,6 +164,27 @@
       line-height: 1.5;
     }
 
+    /* ── Language toggle ── */
+    .lang-toggle {
+      display: flex;
+      gap: 0.25rem;
+      margin-top: 0.75rem;
+    }
+    .lang-btn {
+      padding: 0.2rem 0.6rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      border: 1px solid #334155;
+      border-radius: 4px;
+      background: transparent;
+      color: #94a3b8;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      transition: background 0.1s, color 0.1s;
+    }
+    .lang-btn:hover { background: #1e293b; color: #e2e8f0; }
+    .lang-btn.active { background: #38bdf8; color: #0f172a; border-color: #38bdf8; }
+
     footer {
       text-align: center;
       padding: 2rem 1.5rem;
@@ -176,62 +197,203 @@
 <body>
 
 <header>
-  <h1>Mar Menor <span>Status</span></h1>
-  <p id="last-updated">Loading data…</p>
+  <h1 data-i18n="h1">Mar Menor <span>Status</span></h1>
+  <p id="last-updated" data-i18n="loading">Loading data…</p>
+  <div class="lang-toggle">
+    <button class="lang-btn active" data-lang="en" onclick="setLang('en')">EN</button>
+    <button class="lang-btn"        data-lang="es" onclick="setLang('es')">ES</button>
+  </div>
 </header>
 
 <main>
   <div class="chart-card">
-    <h2>Chlorophyll (µg/L)</h2>
+    <h2 data-i18n="chlTitle">Chlorophyll (µg/L)</h2>
     <canvas id="chart-chlorophyll"></canvas>
-    <p>Chlorophyll indicates how many algae are present in the water.
+    <p data-i18n="chlDesc">Chlorophyll indicates how many algae are present in the water.
        High values mean algae are proliferating, which can deplete oxygen
        and damage the ecosystem. The red line marks the risk threshold: 2 µg/L.</p>
   </div>
 
   <div class="chart-card">
-    <h2>Dissolved Oxygen (mg/L)</h2>
+    <h2 data-i18n="o2Title">Dissolved Oxygen (mg/L)</h2>
     <canvas id="chart-oxygen"></canvas>
-    <p>Fish and marine life need dissolved oxygen to survive.
+    <p data-i18n="o2Desc">Fish and marine life need dissolved oxygen to survive.
        Below 3 mg/L, suffocation events can occur and species begin to die off.
        The red line shows this critical limit.</p>
   </div>
 
   <div class="chart-card">
-    <h2>Water Transparency (m)</h2>
+    <h2 data-i18n="transTitle">Water Transparency (m)</h2>
     <canvas id="chart-transparency"></canvas>
-    <p>The more transparent the water, the healthier the lagoon.
+    <p data-i18n="transDesc">The more transparent the water, the healthier the lagoon.
        When algae or suspended sediments accumulate, water becomes murky
        and sunlight cannot reach the bottom, harming seagrass.</p>
   </div>
 
   <div class="chart-card">
-    <h2>Rambla del Albujón — Nitrates (mg/L)</h2>
+    <h2 data-i18n="nitTitle">Rambla del Albujón — Nitrates (mg/L)</h2>
     <canvas id="chart-nitratos"></canvas>
-    <p>Nitrates are the main nutrient that enters Mar Menor via the Rambla del Albujón.
+    <p data-i18n="nitDesc">Nitrates are the main nutrient that enters Mar Menor via the Rambla del Albujón.
        High nitrate concentrations after rainfall events feed algae blooms.
        Values are measured at sampling stations along the channel and averaged.</p>
   </div>
   <!-- ── Insights (populated by renderInsights() in JS) ── -->
   <div class="chart-card insights-section">
-    <h2>What the data tells us</h2>
+    <h2 data-i18n="insightsTitle">What the data tells us</h2>
     <div id="status-banner"></div>
     <div id="insight-grid" class="insight-grid"></div>
   </div>
 </main>
 
 <footer>
-  Data sources:
+  <span data-i18n="footerSources">Data sources:</span>
   <a href="https://canalmarmenor.carm.es" target="_blank" rel="noopener">Canal Mar Menor (CARM)</a>,
-  IMIDA weekly reports,
-  <a href="https://marmenor.upct.es" target="_blank" rel="noopener">UPCT Mar Menor Observatory</a> (historical 2016–2024)
+  <span data-i18n="footerImida">IMIDA weekly reports</span>,
+  <a href="https://marmenor.upct.es" target="_blank" rel="noopener">UPCT Mar Menor Observatory</a>
+  (<span data-i18n="footerUpct">historical 2016–2024</span>)
   &nbsp;|&nbsp;
-  License: <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>
+  <span data-i18n="footerLicense">License:</span>
+  <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>
   &nbsp;|&nbsp;
-  Updated automatically every Monday
+  <span data-i18n="footerAuto">Updated automatically every Monday</span>
 </footer>
 
 <script>
+  // ─── Translations ─────────────────────────────────────────────────────────
+  let lang = 'en';
+
+  const T = {
+    en: {
+      h1:            'Mar Menor <span>Status</span>',
+      loading:       'Loading data…',
+      lastUpdated:   d => `Last updated: ${d}`,
+      loadError:     'Error loading parameter data.',
+      chlTitle:      'Chlorophyll (µg/L)',
+      o2Title:       'Dissolved Oxygen (mg/L)',
+      transTitle:    'Water Transparency (m)',
+      nitTitle:      'Rambla del Albujón — Nitrates (mg/L)',
+      chlDesc:       'Chlorophyll indicates how many algae are present in the water. High values mean algae are proliferating, which can deplete oxygen and damage the ecosystem. The red line marks the risk threshold: 2 µg/L.',
+      o2Desc:        'Fish and marine life need dissolved oxygen to survive. Below 3 mg/L, suffocation events can occur and species begin to die off. The red line shows this critical limit.',
+      transDesc:     'The more transparent the water, the healthier the lagoon. When algae or suspended sediments accumulate, water becomes murky and sunlight cannot reach the bottom, harming seagrass.',
+      nitDesc:       'Nitrates are the main nutrient that enters Mar Menor via the Rambla del Albujón. High nitrate concentrations after rainfall events feed algae blooms. Values are measured at sampling stations along the channel and averaged.',
+      rangeAll:      'All',
+      insightsTitle: 'What the data tells us',
+      statusLabel:   'Current status',
+      statusChlHealthy: v => `Chlorophyll healthy (${v} µg/L)`,
+      statusChlNear:    v => `Chlorophyll near alarm threshold (${v} µg/L)`,
+      statusChlAbove:   v => `Chlorophyll above alarm threshold (${v} µg/L)`,
+      statusO2Critical: v => `Dissolved oxygen CRITICAL (${v} mg/L).`,
+      statusO2Low:      v => `Dissolved oxygen low (${v} mg/L).`,
+      statusO2Healthy:  v => `Dissolved oxygen healthy (${v} mg/L).`,
+      statusTrans:      v => `Transparency ${v} m.`,
+      statusWinter:  'After a winter with record nitrate levels, spring warrants monitoring.',
+      worstTitle:    y => `Worst recorded crisis — ${y}`,
+      recovTitle:    y => `A dramatic recovery since ${y}`,
+      chlTransTitle: 'Algae blooms cloud the water',
+      heatO2Title:   'Heat drives oxygen loss',
+      autumnTitle:   'Autumn is the danger season',
+      nitratesTitle: d => `Record nitrates — ${d}`,
+      worstBody:     (times, date, minO2, minO2date) =>
+        `The most severe algae bloom on record: ${times}× above the alarm threshold of 2 µg/L (${date}). Dissolved oxygen fell to a minimum of ${minO2} mg/L on ${minO2date}, close to the 3 mg/L level at which marine life begins to suffocate.`,
+      recovBody:     (worstY, worstAvg, bestY, bestAvg, firstTransY, firstTransAvg, lastTransY, lastTransAvg) =>
+        `Average annual chlorophyll has fallen from ${worstAvg} µg/L in ${worstY} to ${bestAvg} µg/L in ${bestY} — the lowest in the recorded period. ${firstTransY ? `Water transparency has gone from ${firstTransAvg} m average in ${firstTransY} to ${lastTransAvg} m in ${lastTransY}.` : ''}`,
+      chlTransBody:  (r, curTrans) =>
+        `More algae directly means murkier water. The correlation between chlorophyll and water transparency is ${r}. During peak bloom years, transparency dropped below 1 m. Today's reading of ${curTrans != null ? curTrans + ' m' : '—'} reflects how much the ecosystem has improved.`,
+      heatO2Body:    (r, minO2, minO2date) =>
+        `As water temperature rises, dissolved oxygen falls — warm water physically holds less of it. The critical risk window is August–September. The lowest O₂ on record was ${minO2} mg/L on ${minO2date} (critical threshold: 3 mg/L).`,
+      autumnBody:    (worstMonth, autumnAvg, summerAvg) =>
+        `Counter-intuitively, the worst algae months are September–November (avg. ${autumnAvg} µg/L), not summer. Autumn rains flush agricultural nutrients into the lagoon just as temperatures drop, triggering late-season blooms. June–July are the cleanest months (avg. ${summerAvg} µg/L).`,
+      nitratesBody:  (multiple, avg) =>
+        `Heavy rainfall pushed nitrate levels in the Rambla del Albujón to the highest value recorded — ${multiple}× the dataset average of ${avg} mg/L. High nutrient loads typically precede algae blooms by weeks, making the following autumn a period to watch closely.`,
+      footerSources: 'Data sources:',
+      footerImida:   'IMIDA weekly reports',
+      footerUpct:    'historical 2016–2024',
+      footerLicense: 'License:',
+      footerAuto:    'Updated automatically every Monday',
+    },
+    es: {
+      h1:            'Mar Menor <span>Estado</span>',
+      loading:       'Cargando datos…',
+      lastUpdated:   d => `Actualizado: ${d}`,
+      loadError:     'Error al cargar los datos.',
+      chlTitle:      'Clorofila (µg/L)',
+      o2Title:       'Oxígeno Disuelto (mg/L)',
+      transTitle:    'Transparencia del Agua (m)',
+      nitTitle:      'Rambla del Albujón — Nitratos (mg/L)',
+      chlDesc:       'La clorofila indica cuántas algas hay en el agua. Valores altos significan que las algas están proliferando, lo que puede agotar el oxígeno y dañar el ecosistema. La línea roja marca el umbral de riesgo: 2 µg/L.',
+      o2Desc:        'Los peces y la vida marina necesitan oxígeno disuelto para sobrevivir. Por debajo de 3 mg/L pueden producirse eventos de asfixia y las especies comienzan a morir. La línea roja muestra este límite crítico.',
+      transDesc:     'Cuanto más transparente es el agua, más sano está el mar. Cuando se acumulan algas o sedimentos, el agua se enturbia y la luz solar no llega al fondo, perjudicando las praderas de posidonia.',
+      nitDesc:       'Los nitratos son el principal nutriente que entra en el Mar Menor a través de la Rambla del Albujón. Concentraciones altas tras episodios de lluvia alimentan las proliferaciones de algas. Los valores se miden en estaciones de muestreo a lo largo del canal y se promedian.',
+      rangeAll:      'Todo',
+      insightsTitle: 'Qué nos dicen los datos',
+      statusLabel:   'Estado actual',
+      statusChlHealthy: v => `Clorofila en niveles saludables (${v} µg/L)`,
+      statusChlNear:    v => `Clorofila cerca del umbral de alarma (${v} µg/L)`,
+      statusChlAbove:   v => `Clorofila por encima del umbral de alarma (${v} µg/L)`,
+      statusO2Critical: v => `Oxígeno disuelto CRÍTICO (${v} mg/L).`,
+      statusO2Low:      v => `Oxígeno disuelto bajo (${v} mg/L).`,
+      statusO2Healthy:  v => `Oxígeno disuelto saludable (${v} mg/L).`,
+      statusTrans:      v => `Transparencia ${v} m.`,
+      statusWinter:  'Tras un invierno con niveles récord de nitratos, la primavera requiere seguimiento.',
+      worstTitle:    y => `Peor crisis registrada — ${y}`,
+      recovTitle:    y => `Recuperación notable desde ${y}`,
+      chlTransTitle: 'Las algas enturbian el agua',
+      heatO2Title:   'El calor reduce el oxígeno',
+      autumnTitle:   'El otoño es la estación de riesgo',
+      nitratesTitle: d => `Nitratos récord — ${d}`,
+      worstBody:     (times, date, minO2, minO2date) =>
+        `La proliferación de algas más grave registrada: ${times}× por encima del umbral de alarma de 2 µg/L (${date}). El oxígeno cayó hasta ${minO2} mg/L el ${minO2date}, cerca del nivel de 3 mg/L a partir del cual la vida marina comienza a asfixiarse.`,
+      recovBody:     (worstY, worstAvg, bestY, bestAvg, firstTransY, firstTransAvg, lastTransY, lastTransAvg) =>
+        `La clorofila media anual ha bajado de ${worstAvg} µg/L en ${worstY} a ${bestAvg} µg/L en ${bestY}, el nivel más bajo del periodo registrado. ${firstTransY ? `La transparencia del agua ha pasado de ${firstTransAvg} m de media en ${firstTransY} a ${lastTransAvg} m en ${lastTransY}.` : ''}`,
+      chlTransBody:  (r, curTrans) =>
+        `Más algas significa directamente agua más turbia. La correlación entre clorofila y transparencia del agua es de ${r}. En los años de mayor proliferación, la transparencia cayó por debajo de 1 m. La lectura actual de ${curTrans != null ? curTrans + ' m' : '—'} refleja cuánto ha mejorado el ecosistema.`,
+      heatO2Body:    (r, minO2, minO2date) =>
+        `Al subir la temperatura del agua, el oxígeno disuelto baja: el agua caliente retiene menos oxígeno. La ventana de riesgo crítica es agosto-septiembre. El mínimo de O₂ registrado fue de ${minO2} mg/L el ${minO2date} (umbral crítico: 3 mg/L).`,
+      autumnBody:    (worstMonth, autumnAvg, summerAvg) =>
+        `Contrariamente a la intuición, los peores meses para las algas son septiembre-noviembre (media ${autumnAvg} µg/L), no el verano. Las lluvias de otoño arrastran nutrientes agrícolas a la laguna justo cuando bajan las temperaturas. Junio-julio son los meses más limpios (media ${summerAvg} µg/L).`,
+      nitratesBody:  (multiple, avg) =>
+        `Las lluvias empujaron los nitratos en la Rambla del Albujón hasta el valor más alto registrado, ${multiple}× la media del conjunto de datos (${avg} mg/L). Las cargas elevadas de nutrientes suelen preceder a las proliferaciones de algas semanas después.`,
+      footerSources: 'Fuentes de datos:',
+      footerImida:   'informes semanales IMIDA',
+      footerUpct:    'histórico 2016–2024',
+      footerLicense: 'Licencia:',
+      footerAuto:    'Actualizado automáticamente cada lunes',
+    },
+  };
+
+  function setLang(l) {
+    lang = l;
+    document.documentElement.lang = l;
+    document.title = l === 'es' ? 'Estado del Mar Menor' : 'Mar Menor Status';
+
+    // Update all static data-i18n elements
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const key = el.dataset.i18n;
+      const val = T[l][key];
+      if (val !== undefined) el.innerHTML = val;
+    });
+
+    // Update range "All/Todo" buttons (created dynamically by makeChart)
+    document.querySelectorAll('.range-btn[data-months="0"]').forEach(btn => {
+      btn.textContent = T[l].rangeAll;
+    });
+
+    // Highlight active lang button
+    document.querySelectorAll('.lang-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.lang === l);
+    });
+
+    // Re-render dynamic content if data is loaded
+    if (store.params && store.aforos) {
+      const lagoon = dedup(store.params);
+      const allDates = [...lagoon.map(r => r.fecha), ...store.aforos.map(r => r.fecha)]
+        .filter(Boolean).sort();
+      const lastDate = allDates[allDates.length - 1] ?? 'unknown';
+      document.getElementById('last-updated').textContent = T[l].lastUpdated(lastDate);
+      renderInsights(lagoon, store.aforos);
+    }
+  }
+
   // ─── Data store ───────────────────────────────────────────────────────────
   const store = { params: null, aforos: null };
 
@@ -246,7 +408,7 @@
     skipEmptyLines: true,
     complete: ({ data }) => { store.params = data; tryRender(); },
     error: (err) => {
-      document.getElementById("last-updated").textContent = "Error loading parameter data.";
+      document.getElementById("last-updated").textContent = T[lang].loadError;
       console.error("parametros.csv:", err);
     },
   });
@@ -300,7 +462,7 @@
     RANGES.forEach(({ label: lbl, months }) => {
       const btn = document.createElement("button");
       btn.className = "range-btn" + (months === 0 ? " active" : "");
-      btn.textContent = lbl;
+      btn.textContent = months === 0 ? T[lang].rangeAll : lbl;
       btn.dataset.months = months;
       btn.addEventListener("click", () => applyRange(id, months));
       selector.appendChild(btn);
@@ -451,8 +613,7 @@
     ].filter(Boolean).sort();
 
     const lastDate = allDates[allDates.length - 1] ?? "unknown";
-    document.getElementById("last-updated").textContent =
-      `Last updated: ${lastDate}`;
+    document.getElementById("last-updated").textContent = T[lang].lastUpdated(lastDate);
 
     renderInsights(lagoon, aforos);
   }
@@ -576,19 +737,20 @@
       bannerColor = "#fffbeb"; dotColor = "#f59e0b"; borderColor = "#fde68a"; textColor = "#92400e";
     }
 
-    const chlStatus = curChl == null ? "no recent data"
-      : curChl >= 2   ? `above alarm threshold (${fmt(curChl)} µg/L)`
-      : curChl >= 1.5 ? `near alarm threshold (${fmt(curChl)} µg/L)`
-      : `healthy (${fmt(curChl)} µg/L)`;
-    const o2Status  = curO2  == null ? "" : `Dissolved oxygen ${curO2 < 3 ? "CRITICAL" : curO2 < 5 ? "low" : "healthy"} (${fmt(curO2)} mg/L). `;
-    const trStatus  = curTrans == null ? "" : `Transparency ${fmt(curTrans)} m. `;
+    const t = T[lang];
+    const chlStatus = curChl == null ? "—"
+      : curChl >= 2   ? t.statusChlAbove(fmt(curChl))
+      : curChl >= 1.5 ? t.statusChlNear(fmt(curChl))
+      : t.statusChlHealthy(fmt(curChl));
+    const o2Status  = curO2  == null ? "" : (curO2 < 3 ? t.statusO2Critical(fmt(curO2)) : curO2 < 5 ? t.statusO2Low(fmt(curO2)) : t.statusO2Healthy(fmt(curO2))) + " ";
+    const trStatus  = curTrans == null ? "" : t.statusTrans(fmt(curTrans)) + " ";
 
     document.getElementById("status-banner").innerHTML = `
       <div class="status-banner" style="background:${bannerColor};border-color:${borderColor};color:${textColor}">
         <span class="dot" style="background:${dotColor}"></span>
-        <span><strong>Current status (${curDate}):</strong>
-        Chlorophyll ${chlStatus}. ${o2Status}${trStatus}
-        After a winter with record nitrate levels, spring warrants monitoring.</span>
+        <span><strong>${t.statusLabel} (${curDate}):</strong>
+        ${chlStatus}. ${o2Status}${trStatus}
+        ${t.statusWinter}</span>
       </div>`;
 
     // ── Cards ───────────────────────────────────────────────────────────────
@@ -605,53 +767,42 @@
 
     const cards = [
       card("alert",
-        `Worst recorded crisis — ${worstYear4}`,
-        fmt(worstChlVal, 1), "µg/L chlorophyll",
-        `The most severe algae bloom on record: ${timesAbove}× above the alarm threshold of 2 µg/L (${worstChlDate}).
-         Dissolved oxygen fell to a minimum of ${fmt(minO2Val)} mg/L on ${minO2Date},
-         close to the 3 mg/L level at which marine life begins to suffocate.`
+        t.worstTitle(worstYear4),
+        fmt(worstChlVal, 1), "µg/L",
+        t.worstBody(timesAbove, worstChlDate, fmt(minO2Val), minO2Date)
       ),
       card("good",
-        `A dramatic recovery since ${worstYear.year}`,
-        recoveryPct != null ? `−${recoveryPct} %` : "—", `avg. chlorophyll vs. ${worstYear.year}`,
-        `Average annual chlorophyll has fallen from ${fmt(worstYear.avg)} µg/L in ${worstYear.year}
-         to ${fmt(recentBest?.avg)} µg/L in ${recentBest?.year} — the lowest in the recorded period.
-         ${firstTransYear && lastTransYear
-           ? `Water transparency has gone from ${fmt(firstTransYear.avg, 1)} m average in ${firstTransYear.year}
-              to ${fmt(lastTransYear.avg, 1)} m in ${lastTransYear.year}.` : ""}`
+        t.recovTitle(worstYear.year),
+        recoveryPct != null ? `−${recoveryPct} %` : "—", `vs. ${worstYear.year}`,
+        t.recovBody(
+          worstYear.year, fmt(worstYear.avg),
+          recentBest?.year, fmt(recentBest?.avg),
+          firstTransYear?.year, firstTransYear ? fmt(firstTransYear.avg, 1) : null,
+          lastTransYear?.year,  lastTransYear  ? fmt(lastTransYear.avg, 1)  : null,
+        )
       ),
       card("info",
-        "Algae blooms cloud the water",
-        rChlTrans != null ? `r = ${fmt(rChlTrans, 2)}` : "—", "chlorophyll vs. transparency",
-        `More algae directly means murkier water. The correlation between chlorophyll and
-         water transparency is ${rChlTrans != null ? fmt(Math.abs(rChlTrans), 2) : "strong"}.
-         During peak bloom years, transparency dropped below 1 m.
-         Today's reading of ${curTrans != null ? fmt(curTrans, 1) + " m" : "—"} reflects how much the ecosystem has improved.`
+        t.chlTransTitle,
+        rChlTrans != null ? `r = ${fmt(rChlTrans, 2)}` : "—", "chl / transp.",
+        t.chlTransBody(
+          rChlTrans != null ? fmt(Math.abs(rChlTrans), 2) : "—",
+          curTrans != null ? fmt(curTrans, 1) : null
+        )
       ),
       card("info",
-        "Heat drives oxygen loss",
-        rTempO2 != null ? `r = ${fmt(rTempO2, 2)}` : "—", "temperature vs. O₂",
-        `As water temperature rises, dissolved oxygen falls — warm water physically holds less of it.
-         The critical risk window is August–September.
-         The lowest O₂ on record was ${fmt(minO2Val)} mg/L on ${minO2Date}
-         (critical threshold: 3 mg/L).`
+        t.heatO2Title,
+        rTempO2 != null ? `r = ${fmt(rTempO2, 2)}` : "—", "temp / O₂",
+        t.heatO2Body(fmt(Math.abs(rTempO2 ?? 0), 2), fmt(minO2Val), minO2Date)
       ),
       card("info",
-        "Autumn is the danger season",
-        MONTH_NAMES[worstMonthIdx], `highest avg. chlorophyll`,
-        `Counter-intuitively, the worst algae months are September–November
-         (avg. ${fmt(autumnMean, 1)} µg/L), not summer.
-         Autumn rains flush agricultural nutrients into the lagoon just as temperatures drop,
-         triggering late-season blooms.
-         June–July are the cleanest months (avg. ${fmt(summerMean, 1)} µg/L).`
+        t.autumnTitle,
+        MONTH_NAMES[worstMonthIdx], "↑ chl",
+        t.autumnBody(MONTH_NAMES[worstMonthIdx], fmt(autumnMean, 1), fmt(summerMean, 1))
       ),
       card("warning",
-        `Record nitrates — ${maxNitDate}`,
+        t.nitratesTitle(maxNitDate),
         fmt(maxNitVal, 2), "mg/L",
-        `Heavy rainfall pushed nitrate levels in the Rambla del Albujón to the highest value
-         recorded — ${nitMultiple != null ? nitMultiple + "×" : ""} the dataset average of ${fmt(avgNit, 2)} mg/L.
-         High nutrient loads typically precede algae blooms by weeks,
-         making the following autumn a period to watch closely.`
+        t.nitratesBody(nitMultiple != null ? nitMultiple + "×" : "—", fmt(avgNit, 2))
       ),
     ];
 
