@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS aforos_albujon (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha           TEXT NOT NULL UNIQUE,   -- YYYY-MM-DD
     caudal_l_s      REAL,                   -- l/s (flow rate)
-    nitratos_mg_l   REAL                    -- mg/L (nitrates)
+    nitratos_mg_l   REAL,                   -- mg/L (nitrates, converted from µmol NO3/L)
+    fosfatos_mg_l   REAL                    -- mg/L (orthophosphates, converted from µmol PO4/L)
 );
 
 -- Daily precipitation from AEMET weather stations

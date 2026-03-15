@@ -159,6 +159,10 @@ def get_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     with open(SCHEMA) as f:
         conn.executescript(f.read())
+    # Column migrations for existing databases (SQLite has no IF NOT EXISTS for ALTER TABLE)
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(aforos_albujon)").fetchall()}
+    if "fosfatos_mg_l" not in existing:
+        conn.execute("ALTER TABLE aforos_albujon ADD COLUMN fosfatos_mg_l REAL")
     conn.commit()
     return conn
 
@@ -204,9 +208,10 @@ def seed_from_csv(conn: sqlite3.Connection):
             for row in csv.DictReader(f):
                 conn.execute(
                     """INSERT OR IGNORE INTO aforos_albujon
-                       (fecha, caudal_l_s, nitratos_mg_l)
-                       VALUES (:fecha, :caudal_l_s, :nitratos_mg_l)""",
-                    row,
+                       (fecha, caudal_l_s, nitratos_mg_l, fosfatos_mg_l)
+                       VALUES (:fecha, :caudal_l_s, :nitratos_mg_l,
+                               :fosfatos_mg_l)""",
+                    {**row, "fosfatos_mg_l": row.get("fosfatos_mg_l") or None},
                 )
         conn.commit()
         log.info("Seeded aforos_albujon from %s", aforos_csv)
@@ -705,14 +710,17 @@ def scrape_aforos_pdfs(conn: sqlite3.Connection) -> dict:
 
     log.info("[aforos] Found %d PDF links", len(links))
 
-    existing_dates = {
+    # Skip dates that already have both nitrates and phosphates populated
+    complete_dates = {
         row["fecha"]
-        for row in conn.execute("SELECT fecha FROM aforos_albujon").fetchall()
+        for row in conn.execute(
+            "SELECT fecha FROM aforos_albujon WHERE nitratos_mg_l IS NOT NULL AND fosfatos_mg_l IS NOT NULL"
+        ).fetchall()
     }
 
     total_inserted = 0
     for iso_date, href in sorted(links):
-        if iso_date in existing_dates:
+        if iso_date in complete_dates:
             continue
 
         url = href if href.startswith("http") else "https://canalmarmenor.carm.es" + href
@@ -892,29 +900,37 @@ def _parse_aforos_pdf(conn: sqlite3.Connection, pdf_path: Path, report_date: str
 
     Conversion: 1 µmol NO3/L × 62.004 g/mol / 1000 = 0.062004 mg/L
     """
-    # Match the numeric value that appears right before "µmol NO3".
-    # Handles both formats:
-    #   old (2024): "Nitratos ... 11.6 ± 12% µmol NO3/L"
-    #   new (2025): "Nitratos ... 18.554 µmol NO3/L"
-    #   with limit:  "Nitratos ... < 0.403 µmol NO3/L"
-    NITRATE_RE = re.compile(
+    # Match the numeric value before "µmol NO3" or "µmol PO4".
+    # Handles formats:
+    #   "Nitratos ... 18.554 µmol NO3/L"
+    #   "Nitratos ... 11.6 ± 12% µmol NO3/L"
+    #   "Ortofosfatos ... < 0.364 ± 18% µmol PO4/L"
+    NITRATE_RE    = re.compile(
         r"(<?\s*[\d]+(?:[.,]\d+)?)\s+(?:±\s+[\d.]+%\s+)?µmol\s*NO3",
         re.IGNORECASE,
     )
-    UMOL_TO_MGL = 0.062004  # µmol NO3/L → mg/L
+    PHOSPHATE_RE  = re.compile(
+        r"(<?\s*[\d]+(?:[.,]\d+)?)\s+(?:±\s+[\d.]+%\s+)?µmol\s*PO4",
+        re.IGNORECASE,
+    )
+    NO3_TO_MGL  = 0.062004   # µmol NO3/L  → mg/L  (MW 62.004 g/mol)
+    PO4_TO_MGL  = 0.094971   # µmol PO4/L  → mg/L  (MW 94.971 g/mol)
 
-    nitrate_values = []
+    nitrate_values   = []
+    phosphate_values = []
 
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
-                # Extract all text from the page (handles text-blob cells)
                 text = page.extract_text() or ""
                 for m in NITRATE_RE.finditer(text):
-                    raw = m.group(1).replace("<", "").strip()
-                    val = parse_float(raw)
+                    val = parse_float(m.group(1).replace("<", "").strip())
                     if val is not None:
-                        nitrate_values.append(val * UMOL_TO_MGL)
+                        nitrate_values.append(val * NO3_TO_MGL)
+                for m in PHOSPHATE_RE.finditer(text):
+                    val = parse_float(m.group(1).replace("<", "").strip())
+                    if val is not None:
+                        phosphate_values.append(val * PO4_TO_MGL)
     except Exception as e:
         raise RuntimeError(f"pdfplumber failed on {pdf_path.name}: {e}") from e
 
@@ -924,14 +940,23 @@ def _parse_aforos_pdf(conn: sqlite3.Connection, pdf_path: Path, report_date: str
             "The PDF format may have changed."
         )
 
-    avg_nitratos = sum(nitrate_values) / len(nitrate_values)
-    log.info("[aforos] %s: %d stations, avg nitratos = %.4f mg/L",
-             pdf_path.name, len(nitrate_values), avg_nitratos)
+    avg_nitratos  = sum(nitrate_values)   / len(nitrate_values)
+    avg_fosfatos  = sum(phosphate_values) / len(phosphate_values) if phosphate_values else None
+
+    log.info("[aforos] %s: %d stations, avg nitratos = %.4f mg/L, avg fosfatos = %s mg/L",
+             pdf_path.name, len(nitrate_values), avg_nitratos,
+             f"{avg_fosfatos:.4f}" if avg_fosfatos is not None else "n/a")
 
     conn.execute(
-        "INSERT OR IGNORE INTO aforos_albujon (fecha, caudal_l_s, nitratos_mg_l) VALUES (?, NULL, ?)",
-        (report_date, avg_nitratos),
+        "INSERT OR IGNORE INTO aforos_albujon (fecha, caudal_l_s, nitratos_mg_l, fosfatos_mg_l) VALUES (?, NULL, ?, ?)",
+        (report_date, avg_nitratos, avg_fosfatos),
     )
+    # Backfill phosphates on rows that were inserted before the column existed
+    if avg_fosfatos is not None:
+        conn.execute(
+            "UPDATE aforos_albujon SET fosfatos_mg_l = ? WHERE fecha = ? AND fosfatos_mg_l IS NULL",
+            (avg_fosfatos, report_date),
+        )
     conn.commit()
     return 1
 
@@ -964,11 +989,11 @@ def export_csv(conn: sqlite3.Connection):
 
     # Export aforos_albujon
     rows = conn.execute(
-        "SELECT fecha, caudal_l_s, nitratos_mg_l FROM aforos_albujon ORDER BY fecha ASC"
+        "SELECT fecha, caudal_l_s, nitratos_mg_l, fosfatos_mg_l FROM aforos_albujon ORDER BY fecha ASC"
     ).fetchall()
     with open(aforos_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["fecha", "caudal_l_s", "nitratos_mg_l"])
+        writer.writerow(["fecha", "caudal_l_s", "nitratos_mg_l", "fosfatos_mg_l"])
         for row in rows:
             writer.writerow([row[k] if row[k] is not None else "" for k in row.keys()])
     log.info("Exported %d rows to %s", len(rows), aforos_path)

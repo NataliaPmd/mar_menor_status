@@ -1,984 +1,116 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mar Menor Status</title>
+  <title>Estado del Mar Menor</title>
+  <link rel="stylesheet" href="css/styles.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      background: #f8fafc;
-      color: #1e293b;
-      line-height: 1.6;
-    }
-
-    header {
-      background: #0f172a;
-      color: #e2e8f0;
-      padding: 2rem 1.5rem 1.5rem;
-    }
-    header h1 {
-      font-size: 1.75rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-    }
-    header h1 span {
-      color: #38bdf8;
-    }
-    #last-updated {
-      margin-top: 0.4rem;
-      font-size: 0.875rem;
-      color: #94a3b8;
-    }
-
-    main {
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 2rem 1.5rem;
-      display: grid;
-      gap: 2.5rem;
-    }
-
-    .chart-card {
-      background: #fff;
-      border-radius: 12px;
-      padding: 1.5rem;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    }
-    .chart-card h2 {
-      font-size: 1rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: #64748b;
-      margin-bottom: 1rem;
-    }
-    .chart-card canvas {
-      max-height: 260px;
-    }
-    .range-selector {
-      display: flex;
-      gap: 0.25rem;
-      margin-bottom: 0.75rem;
-      flex-wrap: wrap;
-    }
-    .range-btn {
-      padding: 0.2rem 0.55rem;
-      font-size: 0.72rem;
-      font-weight: 600;
-      border: 1px solid #e2e8f0;
-      border-radius: 4px;
-      background: #f8fafc;
-      color: #64748b;
-      cursor: pointer;
-      letter-spacing: 0.03em;
-      transition: background 0.1s, color 0.1s;
-    }
-    .range-btn:hover { background: #e2e8f0; }
-    .range-btn.active {
-      background: #0f172a;
-      color: #f1f5f9;
-      border-color: #0f172a;
-    }
-    .chart-card p {
-      margin-top: 1rem;
-      font-size: 0.875rem;
-      color: #475569;
-      border-left: 3px solid #e2e8f0;
-      padding-left: 0.75rem;
-    }
-
-    /* ── Insights section ── */
-    .insights-section h2 {
-      font-size: 1rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: #64748b;
-      margin-bottom: 1.25rem;
-    }
-
-    .status-banner {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      background: #f0fdf4;
-      border: 1px solid #bbf7d0;
-      border-radius: 10px;
-      padding: 0.9rem 1.1rem;
-      margin-bottom: 1.25rem;
-      font-size: 0.9rem;
-      color: #166534;
-    }
-    .status-banner .dot {
-      width: 10px; height: 10px;
-      border-radius: 50%;
-      background: #22c55e;
-      flex-shrink: 0;
-    }
-    .status-banner strong { font-weight: 600; }
-
-    .insight-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 1rem;
-    }
-    .insight-card {
-      background: #fff;
-      border-radius: 10px;
-      padding: 1.1rem 1.2rem;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.07);
-      border-top: 3px solid #e2e8f0;
-    }
-    .insight-card.warning { border-top-color: #f59e0b; }
-    .insight-card.alert   { border-top-color: #ef4444; }
-    .insight-card.good    { border-top-color: #22c55e; }
-    .insight-card.info    { border-top-color: #3b82f6; }
-    .insight-card h3 {
-      font-size: 0.8rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #94a3b8;
-      margin-bottom: 0.4rem;
-    }
-    .insight-card .value {
-      font-size: 1.6rem;
-      font-weight: 700;
-      color: #0f172a;
-      line-height: 1.1;
-    }
-    .insight-card .value small {
-      font-size: 0.85rem;
-      font-weight: 400;
-      color: #64748b;
-    }
-    .insight-card p {
-      margin-top: 0.5rem;
-      font-size: 0.8rem;
-      color: #475569;
-      line-height: 1.5;
-    }
-
-    /* ── Language toggle ── */
-    .lang-toggle {
-      display: flex;
-      gap: 0.25rem;
-      margin-top: 0.75rem;
-    }
-    .lang-btn {
-      padding: 0.2rem 0.6rem;
-      font-size: 0.75rem;
-      font-weight: 700;
-      border: 1px solid #334155;
-      border-radius: 4px;
-      background: transparent;
-      color: #94a3b8;
-      cursor: pointer;
-      letter-spacing: 0.05em;
-      transition: background 0.1s, color 0.1s;
-    }
-    .lang-btn:hover { background: #1e293b; color: #e2e8f0; }
-    .lang-btn.active { background: #38bdf8; color: #0f172a; border-color: #38bdf8; }
-
-    footer {
-      text-align: center;
-      padding: 2rem 1.5rem;
-      font-size: 0.8rem;
-      color: #94a3b8;
-    }
-    footer a { color: #64748b; }
-  </style>
+  <script src="js/constants.js"></script>
+  <script src="js/translations.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/insights.js"></script>
+  <script src="js/app.js"></script>
 </head>
 <body>
 
 <header>
-  <h1 data-i18n="h1">Mar Menor <span>Status</span></h1>
-  <p id="last-updated" data-i18n="loading">Loading data…</p>
+  <h1 data-i18n="h1"><span>Estado</span> del Mar Menor</h1>
+  <p id="last-updated" data-i18n="loading">Cargando datos…</p>
   <div class="lang-toggle">
-    <button class="lang-btn active" data-lang="en" onclick="setLang('en')">EN</button>
-    <button class="lang-btn"        data-lang="es" onclick="setLang('es')">ES</button>
+    <button class="lang-btn"        data-lang="en" onclick="setLang('en')">EN</button>
+    <button class="lang-btn active" data-lang="es" onclick="setLang('es')">ES</button>
   </div>
 </header>
 
 <main>
-  <div class="chart-card">
-    <h2 data-i18n="chlTitle">Chlorophyll (µg/L)</h2>
-    <canvas id="chart-chlorophyll"></canvas>
-    <p data-i18n="chlDesc">Chlorophyll indicates how many algae are present in the water.
-       High values mean algae are proliferating, which can deplete oxygen
-       and damage the ecosystem. The red line marks the risk threshold: 2 µg/L.</p>
-  </div>
-
-  <div class="chart-card">
-    <h2 data-i18n="o2Title">Dissolved Oxygen (mg/L)</h2>
-    <canvas id="chart-oxygen"></canvas>
-    <p data-i18n="o2Desc">Fish and marine life need dissolved oxygen to survive.
-       Below 3 mg/L, suffocation events can occur and species begin to die off.
-       The red line shows this critical limit.</p>
-  </div>
-
-  <div class="chart-card">
-    <h2 data-i18n="transTitle">Water Transparency (m)</h2>
-    <canvas id="chart-transparency"></canvas>
-    <p data-i18n="transDesc">The more transparent the water, the healthier the lagoon.
-       When algae or suspended sediments accumulate, water becomes murky
-       and sunlight cannot reach the bottom, harming seagrass.</p>
-  </div>
-
-  <div class="chart-card">
-    <h2 data-i18n="nitTitle">Rambla del Albujón — Nitrates (mg/L)</h2>
-    <canvas id="chart-nitratos"></canvas>
-    <p data-i18n="nitDesc">Nitrates are the main nutrient that enters Mar Menor via the Rambla del Albujón.
-       High nitrate concentrations after rainfall events feed algae blooms.
-       Values are measured at sampling stations along the channel and averaged.</p>
-  </div>
   <!-- ── Insights (populated by renderInsights() in JS) ── -->
   <div class="chart-card insights-section">
-    <h2 data-i18n="insightsTitle">What the data tells us</h2>
+    <h2 data-i18n="insightsTitle">Qué nos dicen los datos</h2>
     <div id="status-banner"></div>
     <div id="insight-grid" class="insight-grid"></div>
+  </div>
+
+  <div class="chart-card">
+    <h2 data-i18n="nitTitle">Rambla del Albujón — Nitratos, Clorofila y Precipitación</h2>
+    <canvas id="chart-nitratos"></canvas>
+    <p data-i18n="nitDesc">Los nitratos son el principal nutriente que entra en el Mar Menor a través de la Rambla del Albujón.
+       Concentraciones altas tras episodios de lluvia alimentan las proliferaciones de algas.
+       Los valores se miden en estaciones de muestreo a lo largo del canal y se promedian.</p>
+  </div>
+
+  <div class="chart-card">
+    <h2 data-i18n="fosfTitle">Rambla del Albujón — Ortofosfatos (mg/L)</h2>
+    <canvas id="chart-fosfatos"></canvas>
+    <p data-i18n="fosfDesc">Los fosfatos son el segundo nutriente clave que impulsa las proliferaciones
+       de algas en el Mar Menor. Junto con los nitratos, alimentan el crecimiento del fitoplancton.
+       Los valores se promedian entre todas las estaciones de muestreo del canal y se convierten
+       desde µmol PO₄/L.</p>
+  </div>
+
+  <div class="chart-card">
+    <h2 data-i18n="chlTitle">Clorofila (µg/L)</h2>
+    <canvas id="chart-chlorophyll"></canvas>
+    <p data-i18n="chlDesc">La clorofila indica cuántas algas hay en el agua.
+       Valores altos significan que las algas están proliferando, lo que puede agotar el oxígeno
+       y dañar el ecosistema. La línea roja marca el umbral de riesgo: 2 µg/L.</p>
+  </div>
+
+  <div class="chart-card">
+    <h2 data-i18n="o2Title">Oxígeno Disuelto (mg/L)</h2>
+    <canvas id="chart-oxygen"></canvas>
+    <p data-i18n="o2Desc">Los peces y la vida marina necesitan oxígeno disuelto para sobrevivir.
+       Por debajo de 3 mg/L pueden producirse eventos de asfixia y las especies comienzan a morir.
+       La línea roja muestra este límite crítico.</p>
+  </div>
+
+  <div class="chart-card">
+    <h2 data-i18n="transTitle">Transparencia del Agua (m)</h2>
+    <canvas id="chart-transparency"></canvas>
+    <p data-i18n="transDesc">Cuanto más transparente es el agua, más sano está el mar.
+       Cuando se acumulan algas o sedimentos, el agua se enturbia y la luz solar no llega al fondo,
+       perjudicando las praderas de posidonia.</p>
+  </div>
+
+  <div class="chart-card">
+    <h2 data-i18n="tempTitle">Temperatura del Agua (°C)</h2>
+    <canvas id="chart-temperature"></canvas>
+    <p data-i18n="tempDesc">La temperatura del agua impulsa gran parte de la biología de la laguna.
+       Las altas temperaturas estivales aceleran el crecimiento de algas y reducen el oxígeno que
+       el agua puede retener, aumentando el riesgo de episodios de hipoxia en agosto-septiembre.</p>
+  </div>
+
+  <div class="chart-card">
+    <h2 data-i18n="salTitle">Salinidad (PSU)</h2>
+    <canvas id="chart-salinity"></canvas>
+    <p data-i18n="salDesc">El Mar Menor es naturalmente hipersalino, más salado que el Mediterráneo
+       abierto. La salinidad refleja el equilibrio entre evaporación, lluvia e intercambios con el
+       mar a través de las Encañizadas. Bajadas bruscas tras lluvias intensas pueden estresar la
+       vida marina.</p>
+  </div>
+
+  <div class="chart-card">
+    <h2 data-i18n="turbTitle">Turbidez (FTU)</h2>
+    <canvas id="chart-turbidity"></canvas>
+    <p data-i18n="turbDesc">La turbidez mide la opacidad del agua debida a partículas en suspensión
+       (sedimentos, algas, materia orgánica). Una turbidez alta impide que la luz solar llegue a
+       las praderas de posidonia. Suele dispararse tras tormentas y durante proliferaciones de algas.</p>
   </div>
 </main>
 
 <footer>
-  <span data-i18n="footerSources">Data sources:</span>
+  <span data-i18n="footerSources">Fuentes de datos:</span>
   <a href="https://canalmarmenor.carm.es" target="_blank" rel="noopener">Canal Mar Menor (CARM)</a>,
-  <span data-i18n="footerImida">IMIDA weekly reports</span>,
+  <span data-i18n="footerImida">informes semanales IMIDA</span>,
   <a href="https://marmenor.upct.es" target="_blank" rel="noopener">UPCT Mar Menor Observatory</a>
-  (<span data-i18n="footerUpct">historical 2016–2024</span>)
+  (<span data-i18n="footerUpct">histórico 2016–2024</span>)
   &nbsp;|&nbsp;
-  <span data-i18n="footerLicense">License:</span>
+  <span data-i18n="footerLicense">Licencia:</span>
   <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>
   &nbsp;|&nbsp;
-  <span data-i18n="footerAuto">Updated automatically every Monday</span>
+  <span data-i18n="footerAuto">Actualizado automáticamente cada lunes</span>
 </footer>
 
-<script>
-  // ─── Translations ─────────────────────────────────────────────────────────
-  let lang = 'en';
-
-  const T = {
-    en: {
-      h1:            'Mar Menor <span>Status</span>',
-      loading:       'Loading data…',
-      lastUpdated:   d => `Last updated: ${d}`,
-      loadError:     'Error loading parameter data.',
-      chlTitle:      'Chlorophyll (µg/L)',
-      o2Title:       'Dissolved Oxygen (mg/L)',
-      transTitle:    'Water Transparency (m)',
-      nitTitle:      'Rambla del Albujón — Nitrates (mg/L)',
-      chlDesc:       'Chlorophyll indicates how many algae are present in the water. High values mean algae are proliferating, which can deplete oxygen and damage the ecosystem. The red line marks the risk threshold: 2 µg/L.',
-      o2Desc:        'Fish and marine life need dissolved oxygen to survive. Below 3 mg/L, suffocation events can occur and species begin to die off. The red line shows this critical limit.',
-      transDesc:     'The more transparent the water, the healthier the lagoon. When algae or suspended sediments accumulate, water becomes murky and sunlight cannot reach the bottom, harming seagrass.',
-      nitDesc:       'Nitrates are the main nutrient that enters Mar Menor via the Rambla del Albujón. High nitrate concentrations after rainfall events feed algae blooms. Values are measured at sampling stations along the channel and averaged.',
-      rangeAll:      'All',
-      insightsTitle: 'What the data tells us',
-      statusLabel:   'Current status',
-      statusChlHealthy: v => `Chlorophyll healthy (${v} µg/L)`,
-      statusChlNear:    v => `Chlorophyll near alarm threshold (${v} µg/L)`,
-      statusChlAbove:   v => `Chlorophyll above alarm threshold (${v} µg/L)`,
-      statusO2Critical: v => `Dissolved oxygen CRITICAL (${v} mg/L).`,
-      statusO2Low:      v => `Dissolved oxygen low (${v} mg/L).`,
-      statusO2Healthy:  v => `Dissolved oxygen healthy (${v} mg/L).`,
-      statusTrans:      v => `Transparency ${v} m.`,
-      statusWinter:  'After a winter with record nitrate levels, spring warrants monitoring.',
-      worstTitle:    y => `Worst recorded crisis — ${y}`,
-      recovTitle:    y => `A dramatic recovery since ${y}`,
-      chlTransTitle: 'Algae blooms cloud the water',
-      heatO2Title:   'Heat drives oxygen loss',
-      autumnTitle:   'Autumn is the danger season',
-      nitratesTitle: d => `Record nitrates — ${d}`,
-      worstBody:     (times, date, minO2, minO2date) =>
-        `The most severe algae bloom on record: ${times}× above the alarm threshold of 2 µg/L (${date}). Dissolved oxygen fell to a minimum of ${minO2} mg/L on ${minO2date}, close to the 3 mg/L level at which marine life begins to suffocate.`,
-      recovBody:     (worstY, worstAvg, bestY, bestAvg, firstTransY, firstTransAvg, lastTransY, lastTransAvg) =>
-        `Average annual chlorophyll has fallen from ${worstAvg} µg/L in ${worstY} to ${bestAvg} µg/L in ${bestY} — the lowest in the recorded period. ${firstTransY ? `Water transparency has gone from ${firstTransAvg} m average in ${firstTransY} to ${lastTransAvg} m in ${lastTransY}.` : ''}`,
-      chlTransBody:  (r, curTrans) =>
-        `More algae directly means murkier water. The correlation between chlorophyll and water transparency is ${r}. During peak bloom years, transparency dropped below 1 m. Today's reading of ${curTrans != null ? curTrans + ' m' : '—'} reflects how much the ecosystem has improved.`,
-      heatO2Body:    (r, minO2, minO2date) =>
-        `As water temperature rises, dissolved oxygen falls — warm water physically holds less of it. The critical risk window is August–September. The lowest O₂ on record was ${minO2} mg/L on ${minO2date} (critical threshold: 3 mg/L).`,
-      autumnBody:    (worstMonth, autumnAvg, summerAvg) =>
-        `Counter-intuitively, the worst algae months are September–November (avg. ${autumnAvg} µg/L), not summer. Autumn rains flush agricultural nutrients into the lagoon just as temperatures drop, triggering late-season blooms. June–July are the cleanest months (avg. ${summerAvg} µg/L).`,
-      nitratesBody:  (multiple, avg) =>
-        `Heavy rainfall pushed nitrate levels in the Rambla del Albujón to the highest value recorded — ${multiple}× the dataset average of ${avg} mg/L. High nutrient loads typically precede algae blooms by weeks, making the following autumn a period to watch closely.`,
-      footerSources: 'Data sources:',
-      footerImida:   'IMIDA weekly reports',
-      footerUpct:    'historical 2016–2024',
-      footerLicense: 'License:',
-      footerAuto:    'Updated automatically every Monday',
-    },
-    es: {
-      h1:            'Mar Menor <span>Estado</span>',
-      loading:       'Cargando datos…',
-      lastUpdated:   d => `Actualizado: ${d}`,
-      loadError:     'Error al cargar los datos.',
-      chlTitle:      'Clorofila (µg/L)',
-      o2Title:       'Oxígeno Disuelto (mg/L)',
-      transTitle:    'Transparencia del Agua (m)',
-      nitTitle:      'Rambla del Albujón — Nitratos (mg/L)',
-      chlDesc:       'La clorofila indica cuántas algas hay en el agua. Valores altos significan que las algas están proliferando, lo que puede agotar el oxígeno y dañar el ecosistema. La línea roja marca el umbral de riesgo: 2 µg/L.',
-      o2Desc:        'Los peces y la vida marina necesitan oxígeno disuelto para sobrevivir. Por debajo de 3 mg/L pueden producirse eventos de asfixia y las especies comienzan a morir. La línea roja muestra este límite crítico.',
-      transDesc:     'Cuanto más transparente es el agua, más sano está el mar. Cuando se acumulan algas o sedimentos, el agua se enturbia y la luz solar no llega al fondo, perjudicando las praderas de posidonia.',
-      nitDesc:       'Los nitratos son el principal nutriente que entra en el Mar Menor a través de la Rambla del Albujón. Concentraciones altas tras episodios de lluvia alimentan las proliferaciones de algas. Los valores se miden en estaciones de muestreo a lo largo del canal y se promedian.',
-      rangeAll:      'Todo',
-      insightsTitle: 'Qué nos dicen los datos',
-      statusLabel:   'Estado actual',
-      statusChlHealthy: v => `Clorofila en niveles saludables (${v} µg/L)`,
-      statusChlNear:    v => `Clorofila cerca del umbral de alarma (${v} µg/L)`,
-      statusChlAbove:   v => `Clorofila por encima del umbral de alarma (${v} µg/L)`,
-      statusO2Critical: v => `Oxígeno disuelto CRÍTICO (${v} mg/L).`,
-      statusO2Low:      v => `Oxígeno disuelto bajo (${v} mg/L).`,
-      statusO2Healthy:  v => `Oxígeno disuelto saludable (${v} mg/L).`,
-      statusTrans:      v => `Transparencia ${v} m.`,
-      statusWinter:  'Tras un invierno con niveles récord de nitratos, la primavera requiere seguimiento.',
-      worstTitle:    y => `Peor crisis registrada — ${y}`,
-      recovTitle:    y => `Recuperación notable desde ${y}`,
-      chlTransTitle: 'Las algas enturbian el agua',
-      heatO2Title:   'El calor reduce el oxígeno',
-      autumnTitle:   'El otoño es la estación de riesgo',
-      nitratesTitle: d => `Nitratos récord — ${d}`,
-      worstBody:     (times, date, minO2, minO2date) =>
-        `La proliferación de algas más grave registrada: ${times}× por encima del umbral de alarma de 2 µg/L (${date}). El oxígeno cayó hasta ${minO2} mg/L el ${minO2date}, cerca del nivel de 3 mg/L a partir del cual la vida marina comienza a asfixiarse.`,
-      recovBody:     (worstY, worstAvg, bestY, bestAvg, firstTransY, firstTransAvg, lastTransY, lastTransAvg) =>
-        `La clorofila media anual ha bajado de ${worstAvg} µg/L en ${worstY} a ${bestAvg} µg/L en ${bestY}, el nivel más bajo del periodo registrado. ${firstTransY ? `La transparencia del agua ha pasado de ${firstTransAvg} m de media en ${firstTransY} a ${lastTransAvg} m en ${lastTransY}.` : ''}`,
-      chlTransBody:  (r, curTrans) =>
-        `Más algas significa directamente agua más turbia. La correlación entre clorofila y transparencia del agua es de ${r}. En los años de mayor proliferación, la transparencia cayó por debajo de 1 m. La lectura actual de ${curTrans != null ? curTrans + ' m' : '—'} refleja cuánto ha mejorado el ecosistema.`,
-      heatO2Body:    (r, minO2, minO2date) =>
-        `Al subir la temperatura del agua, el oxígeno disuelto baja: el agua caliente retiene menos oxígeno. La ventana de riesgo crítica es agosto-septiembre. El mínimo de O₂ registrado fue de ${minO2} mg/L el ${minO2date} (umbral crítico: 3 mg/L).`,
-      autumnBody:    (worstMonth, autumnAvg, summerAvg) =>
-        `Contrariamente a la intuición, los peores meses para las algas son septiembre-noviembre (media ${autumnAvg} µg/L), no el verano. Las lluvias de otoño arrastran nutrientes agrícolas a la laguna justo cuando bajan las temperaturas. Junio-julio son los meses más limpios (media ${summerAvg} µg/L).`,
-      nitratesBody:  (multiple, avg) =>
-        `Las lluvias empujaron los nitratos en la Rambla del Albujón hasta el valor más alto registrado, ${multiple}× la media del conjunto de datos (${avg} mg/L). Las cargas elevadas de nutrientes suelen preceder a las proliferaciones de algas semanas después.`,
-      footerSources: 'Fuentes de datos:',
-      footerImida:   'informes semanales IMIDA',
-      footerUpct:    'histórico 2016–2024',
-      footerLicense: 'Licencia:',
-      footerAuto:    'Actualizado automáticamente cada lunes',
-    },
-  };
-
-  function setLang(l) {
-    lang = l;
-    document.documentElement.lang = l;
-    document.title = l === 'es' ? 'Estado del Mar Menor' : 'Mar Menor Status';
-
-    // Update all static data-i18n elements
-    document.querySelectorAll('[data-i18n]').forEach(el => {
-      const key = el.dataset.i18n;
-      const val = T[l][key];
-      if (val !== undefined) el.innerHTML = val;
-    });
-
-    // Update range "All/Todo" buttons (created dynamically by makeChart)
-    document.querySelectorAll('.range-btn[data-months="0"]').forEach(btn => {
-      btn.textContent = T[l].rangeAll;
-    });
-
-    // Highlight active lang button
-    document.querySelectorAll('.lang-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.lang === l);
-    });
-
-    // Re-render dynamic content if data is loaded
-    if (store.params && store.aforos && store.precip !== null) {
-      const lagoon = dedup(store.params);
-      const allDates = [...lagoon.map(r => r.fecha), ...store.aforos.map(r => r.fecha)]
-        .filter(Boolean).sort();
-      const lastDate = allDates[allDates.length - 1] ?? 'unknown';
-      document.getElementById('last-updated').textContent = T[l].lastUpdated(lastDate);
-      renderInsights(lagoon, store.aforos);
-    }
-  }
-
-  // ─── Data store ───────────────────────────────────────────────────────────
-  const store = { params: null, aforos: null, precip: null };
-
-  function tryRender() {
-    if (store.params !== null && store.aforos !== null && store.precip !== null) renderCharts();
-  }
-
-  // ─── Load CSVs ────────────────────────────────────────────────────────────
-  Papa.parse("datos/parametros.csv", {
-    download: true,
-    header: true,
-    skipEmptyLines: true,
-    complete: ({ data }) => { store.params = data; tryRender(); },
-    error: (err) => {
-      document.getElementById("last-updated").textContent = T[lang].loadError;
-      console.error("parametros.csv:", err);
-    },
-  });
-
-  Papa.parse("datos/aforos.csv", {
-    download: true,
-    header: true,
-    skipEmptyLines: true,
-    complete: ({ data }) => { store.aforos = data; tryRender(); },
-    error: (err) => {
-      console.error("aforos.csv:", err);
-      store.aforos = [];
-      tryRender();
-    },
-  });
-
-  Papa.parse("datos/precipitacion.csv", {
-    download: true,
-    header: true,
-    skipEmptyLines: true,
-    complete: ({ data }) => { store.precip = data; tryRender(); },
-    error: () => { store.precip = []; tryRender(); },  // graceful fallback if not yet generated
-  });
-
-  // ─── Helpers ──────────────────────────────────────────────────────────────
-
-  function toNum(v) {
-    const n = parseFloat(v);
-    return isNaN(n) ? null : n;
-  }
-
-  function threshold(dates, value) {
-    // Returns a flat array for a dashed threshold line at y=value
-    return dates.map(() => value);
-  }
-
-  // Biological alert thresholds — change here to update charts + insights together
-  const CHLOROPHYLL_ALARM_UGL = 2;    // µg/L: ecological risk threshold
-  const CHLOROPHYLL_WARN_UGL  = 1.5;  // µg/L: early warning
-  const O2_CRITICAL_MGL       = 3;    // mg/L: hypoxia threshold
-  const O2_LOW_MGL            = 5;    // mg/L: below-optimal dissolved oxygen
-
-  // Stores full unfiltered data and Chart.js instances for range updates
-  const chartData = {};
-  const chartInstances = {};
-
-  const RANGES = [
-    { label: "1M",  months: 1  },
-    { label: "3M",  months: 3  },
-    { label: "6M",  months: 6  },
-    { label: "1Y",  months: 12 },
-    { label: "3Y",  months: 36 },
-    { label: "All", months: 0  },
-  ];
-
-  function makeChart(id, label, dates, values, color, thresholdValue = null) {
-    // Persist full data so range changes can re-slice without re-fetching
-    chartData[id] = { label, dates, values, color, thresholdValue };
-
-    // Insert range selector buttons before the canvas
-    const canvas = document.getElementById(id);
-    const selector = document.createElement("div");
-    selector.className = "range-selector";
-    selector.dataset.chart = id;
-    RANGES.forEach(({ label: lbl, months }) => {
-      const btn = document.createElement("button");
-      btn.className = "range-btn" + (months === 0 ? " active" : "");
-      btn.textContent = months === 0 ? T[lang].rangeAll : lbl;
-      btn.dataset.months = months;
-      btn.addEventListener("click", () => applyRange(id, months));
-      selector.appendChild(btn);
-    });
-    canvas.parentNode.insertBefore(selector, canvas);
-
-    // Build datasets for the initial (full) render
-    const datasets = buildDatasets(dates, values, color, thresholdValue);
-
-    chartInstances[id] = new Chart(canvas, {
-      type: "line",
-      data: { labels: dates, datasets },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: { display: false },
-          tooltip: { mode: "index", intersect: false },
-        },
-        scales: {
-          x: { ticks: { maxTicksLimit: 10, maxRotation: 0 } },
-          y: { beginAtZero: false },
-        },
-      },
-    });
-  }
-
-  function buildDatasets(dates, values, color, thresholdValue) {
-    const datasets = [{
-      data: values,
-      borderColor: color,
-      backgroundColor: color + "22",
-      borderWidth: 2,
-      pointRadius: 3,
-      tension: 0.3,
-      fill: false,
-      spanGaps: true,
-    }];
-    if (thresholdValue !== null) {
-      datasets.push({
-        label: `Threshold (${thresholdValue})`,
-        data: threshold(dates, thresholdValue),
-        borderColor: "#ef4444",
-        borderWidth: 1.5,
-        borderDash: [6, 4],
-        pointRadius: 0,
-        fill: false,
-      });
-    }
-    return datasets;
-  }
-
-  function applyRange(id, months) {
-    const d = chartData[id];
-
-    // Mixed chart (Albujón: precipitation bars + nitrates line + chlorophyll line)
-    if (d.type === 'albujon') {
-      let dates, nitrates, precip, chlorophyll;
-      if (months === 0) {
-        dates       = d.dates;
-        nitrates    = d.nitrates;
-        precip      = d.precip;
-        chlorophyll = d.chlorophyll;
-      } else {
-        const cutoff = new Date();
-        cutoff.setMonth(cutoff.getMonth() - months);
-        const cutoffStr = cutoff.toISOString().slice(0, 10);
-        const pairs = d.dates
-          .map((dt, i) => [dt, d.nitrates[i], d.precip[i], d.chlorophyll[i]])
-          .filter(([dt]) => dt >= cutoffStr);
-        dates       = pairs.map(p => p[0]);
-        nitrates    = pairs.map(p => p[1]);
-        precip      = pairs.map(p => p[2]);
-        chlorophyll = pairs.map(p => p[3]);
-      }
-      const chart = chartInstances[id];
-      chart.data.labels           = dates;
-      chart.data.datasets[0].data = precip;       // bar dataset (index 0)
-      chart.data.datasets[1].data = nitrates;     // line dataset (index 1)
-      chart.data.datasets[2].data = chlorophyll;  // line dataset (index 2)
-      chart.update();
-      document.querySelectorAll(`.range-selector[data-chart="${id}"] .range-btn`)
-        .forEach(btn => btn.classList.toggle("active", +btn.dataset.months === months));
-      return;
-    }
-
-    const { dates, values, color, thresholdValue } = d;
-
-    let slicedDates, slicedValues;
-    if (months === 0) {
-      slicedDates  = dates;
-      slicedValues = values;
-    } else {
-      const cutoff = new Date();
-      cutoff.setMonth(cutoff.getMonth() - months);
-      const cutoffStr = cutoff.toISOString().slice(0, 10);
-      const pairs = dates
-        .map((dt, i) => [dt, values[i]])
-        .filter(([dt]) => dt >= cutoffStr);
-      slicedDates  = pairs.map(p => p[0]);
-      slicedValues = pairs.map(p => p[1]);
-    }
-
-    const chart = chartInstances[id];
-    chart.data.labels           = slicedDates;
-    chart.data.datasets[0].data = slicedValues;
-    if (thresholdValue !== null) {
-      chart.data.datasets[1].data = threshold(slicedDates, thresholdValue);
-    }
-    chart.update();
-
-    // Highlight the active button
-    document.querySelectorAll(`.range-selector[data-chart="${id}"] .range-btn`)
-      .forEach(btn => btn.classList.toggle("active", +btn.dataset.months === months));
-  }
-
-  // ─── Albujón mixed chart: nitrates (line) + precipitation (bars) ───────────
-
-  // Sum precipitation over the 7 days ending on each aforos sample date.
-  // This provides the "rainfall context" for each nitrate measurement.
-  function buildWeeklyPrecip(afDates, precipByDate) {
-    return afDates.map(fecha => {
-      let sum = 0, hasData = false;
-      for (let i = 0; i < 7; i++) {
-        const d = new Date(fecha + 'T12:00:00Z');
-        d.setDate(d.getDate() - i);
-        const key = d.toISOString().slice(0, 10);
-        const v = precipByDate[key];
-        if (v != null) { sum += v; hasData = true; }
-      }
-      return hasData ? sum : null;
-    });
-  }
-
-  function makeAlbujonChart(id, dates, nitrates, precip, chlorophyll) {
-    chartData[id] = { type: 'albujon', dates, nitrates, precip, chlorophyll };
-
-    const canvas = document.getElementById(id);
-    const selector = document.createElement("div");
-    selector.className = "range-selector";
-    selector.dataset.chart = id;
-    RANGES.forEach(({ label: lbl, months }) => {
-      const btn = document.createElement("button");
-      btn.className = "range-btn" + (months === 0 ? " active" : "");
-      btn.textContent = months === 0 ? T[lang].rangeAll : lbl;
-      btn.dataset.months = months;
-      btn.addEventListener("click", () => applyRange(id, months));
-      selector.appendChild(btn);
-    });
-    canvas.parentNode.insertBefore(selector, canvas);
-
-    chartInstances[id] = new Chart(canvas, {
-      data: {
-        labels: dates,
-        datasets: [
-          {
-            type: 'bar',
-            label: '7-day rainfall (mm)',
-            data: precip,
-            backgroundColor: '#94a3b833',
-            borderColor: '#94a3b855',
-            borderWidth: 1,
-            yAxisID: 'yPrecip',
-            order: 3,
-          },
-          {
-            type: 'line',
-            label: 'Nitrates (mg/L)',
-            data: nitrates,
-            borderColor: '#f97316',
-            backgroundColor: '#f9731622',
-            borderWidth: 2,
-            pointRadius: 3,
-            tension: 0.3,
-            fill: false,
-            spanGaps: true,
-            yAxisID: 'yNitrates',
-            order: 1,
-          },
-          {
-            type: 'line',
-            label: 'Chlorophyll (µg/L)',
-            data: chlorophyll,
-            borderColor: '#22c55e',
-            backgroundColor: '#22c55e22',
-            borderWidth: 2,
-            pointRadius: 2,
-            tension: 0.3,
-            fill: false,
-            spanGaps: true,
-            yAxisID: 'yNitrates',
-            order: 2,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
-          tooltip: { mode: 'index', intersect: false },
-        },
-        scales: {
-          x: { ticks: { maxTicksLimit: 10, maxRotation: 0 } },
-          yNitrates: {
-            type: 'linear',
-            position: 'left',
-            beginAtZero: false,
-            title: { display: true, text: 'Nitrates (mg/L) · Chlorophyll (µg/L)', font: { size: 11 } },
-          },
-          yPrecip: {
-            type: 'linear',
-            position: 'right',
-            beginAtZero: true,
-            grid: { drawOnChartArea: false },
-            title: { display: true, text: 'Rainfall 7d (mm)', font: { size: 11 } },
-          },
-        },
-      },
-    });
-  }
-
-  // ─── Render all charts ────────────────────────────────────────────────────
-
-  // Deduplicate records by date, keeping the most authoritative source.
-  // Priority: cdg (3) > imida (2) > html (1).
-  // This ensures that when multiple sources have data for the same date,
-  // only the best one is shown, while html fills in dates not covered by
-  // cdg/imida (mainly the most recent weeks of the current year).
-  function dedup(rows) {
-    const PRIORITY = { cdg: 3, imida: 2, html: 1, upct: 0 };
-    const best = {};
-    for (const r of rows) {
-      const p = PRIORITY[r.fuente] || 0;
-      if (!best[r.fecha] || p > (PRIORITY[best[r.fecha].fuente] || 0)) {
-        best[r.fecha] = r;
-      }
-    }
-    return Object.values(best).sort((a, b) => a.fecha.localeCompare(b.fecha));
-  }
-
-  function renderCharts() {
-    const params  = store.params;
-    const aforos  = store.aforos;
-
-    // Merge all sources, keeping one record per date (cdg > imida > html)
-    const lagoon = dedup(params);
-    const lagoonDates = lagoon.map(r => r.fecha);
-
-    makeChart(
-      "chart-chlorophyll",
-      "Chlorophyll (µg/L)",
-      lagoonDates,
-      lagoon.map(r => toNum(r.clorofila_ug_l)),
-      "#22c55e",
-      CHLOROPHYLL_ALARM_UGL,
-    );
-
-    makeChart(
-      "chart-oxygen",
-      "Dissolved Oxygen (mg/L)",
-      lagoonDates,
-      lagoon.map(r => toNum(r.oxigeno_mg_l)),
-      "#3b82f6",
-      O2_CRITICAL_MGL,
-    );
-
-    makeChart(
-      "chart-transparency",
-      "Transparency (m)",
-      lagoonDates,
-      lagoon.map(r => toNum(r.transparencia_m)),
-      "#06b6d4",
-    );
-
-    // Build precipitation lookup (date → mm) for the Albujón mixed chart
-    const precipByDate = {};
-    for (const r of store.precip) {
-      const v = toNum(r.prec_mm);
-      if (v !== null) precipByDate[r.fecha] = v;
-    }
-
-    // Build chlorophyll lookup (date → µg/L) from deduplicated lagoon data
-    const chlByDate = {};
-    for (const r of lagoon) {
-      const v = toNum(r.clorofila_ug_l);
-      if (v !== null) chlByDate[r.fecha] = v;
-    }
-
-    // Merge aforos and lagoon dates into a single sorted axis
-    const mergedDates = [...new Set([
-      ...aforos.map(r => r.fecha),
-      ...Object.keys(chlByDate),
-    ])].sort();
-
-    const nitMap  = Object.fromEntries(aforos.map(r => [r.fecha, toNum(r.nitratos_mg_l)]));
-    const mergedNitrates    = mergedDates.map(d => nitMap[d]    ?? null);
-    const mergedChl         = mergedDates.map(d => chlByDate[d] ?? null);
-    const mergedPrecip      = buildWeeklyPrecip(mergedDates, precipByDate);
-
-    makeAlbujonChart("chart-nitratos", mergedDates, mergedNitrates, mergedPrecip, mergedChl);
-
-    // Last updated: most recent date across both datasets
-    const allDates = [
-      ...lagoonDates,
-      ...aforos.map(r => r.fecha),
-    ].filter(Boolean).sort();
-
-    const lastDate = allDates[allDates.length - 1] ?? "unknown";
-    document.getElementById("last-updated").textContent = T[lang].lastUpdated(lastDate);
-
-    renderInsights(lagoon, aforos);
-  }
-
-  // ─── Insights ─────────────────────────────────────────────────────────────
-
-  function corr(xs, ys) {
-    const n = xs.length;
-    if (n < 3) return null;
-    const mx = xs.reduce((a, b) => a + b, 0) / n;
-    const my = ys.reduce((a, b) => a + b, 0) / n;
-    const num = xs.reduce((s, x, i) => s + (x - mx) * (ys[i] - my), 0);
-    const dx  = Math.sqrt(xs.reduce((s, x) => s + (x - mx) ** 2, 0));
-    const dy  = Math.sqrt(ys.reduce((s, y) => s + (y - my) ** 2, 0));
-    return (dx && dy) ? num / (dx * dy) : null;
-  }
-
-  function fmt(n, decimals = 2) {
-    return n == null ? "—" : n.toFixed(decimals);
-  }
-
-  function renderInsights(lagoon, aforos) {
-    // ── Collect paired values for correlations ──────────────────────────────
-    const chlTransPairs = lagoon.filter(r => toNum(r.clorofila_ug_l) != null && toNum(r.transparencia_m) != null);
-    const tempO2Pairs   = lagoon.filter(r => toNum(r.temperatura) != null && toNum(r.oxigeno_mg_l) != null);
-
-    const rChlTrans = corr(
-      chlTransPairs.map(r => toNum(r.clorofila_ug_l)),
-      chlTransPairs.map(r => toNum(r.transparencia_m)),
-    );
-    const rTempO2 = corr(
-      tempO2Pairs.map(r => toNum(r.temperatura)),
-      tempO2Pairs.map(r => toNum(r.oxigeno_mg_l)),
-    );
-
-    // ── Worst chlorophyll event ─────────────────────────────────────────────
-    const chlRows = lagoon.filter(r => toNum(r.clorofila_ug_l) != null);
-    const worstChl = chlRows.reduce((a, b) =>
-      toNum(b.clorofila_ug_l) > toNum(a.clorofila_ug_l) ? b : a, chlRows[0]);
-    const worstChlVal  = toNum(worstChl?.clorofila_ug_l);
-    const worstChlDate = worstChl?.fecha ?? "";
-
-    // Min O2 on record
-    const o2Rows  = lagoon.filter(r => toNum(r.oxigeno_mg_l) != null);
-    const minO2Row = o2Rows.reduce((a, b) =>
-      toNum(b.oxigeno_mg_l) < toNum(a.oxigeno_mg_l) ? b : a, o2Rows[0]);
-    const minO2Val  = toNum(minO2Row?.oxigeno_mg_l);
-    const minO2Date = minO2Row?.fecha ?? "";
-
-    // ── Recovery: worst year vs best recent year ────────────────────────────
-    const byYear = {};
-    for (const r of chlRows) {
-      const y = r.fecha.slice(0, 4);
-      if (!byYear[y]) byYear[y] = [];
-      byYear[y].push(toNum(r.clorofila_ug_l));
-    }
-    const yearAvgs = Object.entries(byYear)
-      .map(([y, vals]) => ({ year: y, avg: vals.reduce((a, b) => a + b, 0) / vals.length }))
-      .sort((a, b) => a.year.localeCompare(b.year));
-
-    const worstYear = yearAvgs.reduce((a, b) => b.avg > a.avg ? b : a, yearAvgs[0]);
-    // Best recent year = lowest avg among years with at least 6 data points
-    const recentBest = yearAvgs
-      .filter(e => byYear[e.year].length >= 6)
-      .reduce((a, b) => b.avg < a.avg ? b : a);
-    const recoveryPct = worstYear && recentBest
-      ? Math.round((1 - recentBest.avg / worstYear.avg) * 100) : null;
-
-    // Transparency: earliest year avg vs latest year with data
-    const byYearTrans = {};
-    for (const r of lagoon) {
-      const v = toNum(r.transparencia_m);
-      if (v == null) continue;
-      const y = r.fecha.slice(0, 4);
-      if (!byYearTrans[y]) byYearTrans[y] = [];
-      byYearTrans[y].push(v);
-    }
-    const transYears = Object.entries(byYearTrans)
-      .map(([y, vals]) => ({ year: y, avg: vals.reduce((a, b) => a + b, 0) / vals.length }))
-      .sort((a, b) => a.year.localeCompare(b.year));
-    const firstTransYear = transYears[0];
-    const lastTransYear  = transYears[transYears.length - 1];
-
-    // ── Seasonal chlorophyll ────────────────────────────────────────────────
-    const byMonth = Array.from({ length: 12 }, () => []);
-    for (const r of chlRows) {
-      const m = parseInt(r.fecha.slice(5, 7), 10) - 1;
-      byMonth[m].push(toNum(r.clorofila_ug_l));
-    }
-    const monthAvg = byMonth.map(vs => vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null);
-    // Worst month index (0-based)
-    const worstMonthIdx = monthAvg.reduce((best, v, i) => (v != null && (best === -1 || v > monthAvg[best])) ? i : best, -1);
-    const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-    // Autumn avg (Sep=8, Oct=9, Nov=10) vs summer avg (Jun=5, Jul=6)
-    const autumnAvg = [8,9,10].map(i => monthAvg[i]).filter(v => v != null);
-    const summerAvg = [5,6].map(i => monthAvg[i]).filter(v => v != null);
-    const autumnMean = autumnAvg.reduce((a,b)=>a+b,0)/autumnAvg.length;
-    const summerMean = summerAvg.reduce((a,b)=>a+b,0)/summerAvg.length;
-
-    // ── Max nitrate ─────────────────────────────────────────────────────────
-    const nitRows = aforos.filter(r => toNum(r.nitratos_mg_l) != null);
-    const maxNitRow = nitRows.reduce((a, b) =>
-      toNum(b.nitratos_mg_l) > toNum(a.nitratos_mg_l) ? b : a, nitRows[0]);
-    const maxNitVal  = toNum(maxNitRow?.nitratos_mg_l);
-    const maxNitDate = maxNitRow?.fecha ?? "";
-    const avgNit = nitRows.reduce((s, r) => s + toNum(r.nitratos_mg_l), 0) / nitRows.length;
-    const nitMultiple = maxNitVal && avgNit ? Math.round(maxNitVal / avgNit) : null;
-
-    // ── Current status ──────────────────────────────────────────────────────
-    const lastRow = [...lagoon].reverse().find(r => r.fecha);
-    const curChl   = toNum(lastRow?.clorofila_ug_l);
-    const curO2    = toNum(lastRow?.oxigeno_mg_l);
-    const curTrans = toNum(lastRow?.transparencia_m);
-    const curDate  = lastRow?.fecha ?? "";
-
-    // ── Status banner ───────────────────────────────────────────────────────
-    let bannerColor = "#f0fdf4"; let dotColor = "#22c55e"; let borderColor = "#bbf7d0"; let textColor = "#166534";
-    if (curChl != null && curChl >= CHLOROPHYLL_ALARM_UGL) {
-      bannerColor = "#fef2f2"; dotColor = "#ef4444"; borderColor = "#fecaca"; textColor = "#991b1b";
-    } else if (curChl != null && curChl >= CHLOROPHYLL_WARN_UGL) {
-      bannerColor = "#fffbeb"; dotColor = "#f59e0b"; borderColor = "#fde68a"; textColor = "#92400e";
-    }
-
-    const t = T[lang];
-    const chlStatus = curChl == null ? "—"
-      : curChl >= CHLOROPHYLL_ALARM_UGL ? t.statusChlAbove(fmt(curChl))
-      : curChl >= CHLOROPHYLL_WARN_UGL  ? t.statusChlNear(fmt(curChl))
-      : t.statusChlHealthy(fmt(curChl));
-    const o2Status  = curO2  == null ? "" : (curO2 < O2_CRITICAL_MGL ? t.statusO2Critical(fmt(curO2)) : curO2 < O2_LOW_MGL ? t.statusO2Low(fmt(curO2)) : t.statusO2Healthy(fmt(curO2))) + " ";
-    const trStatus  = curTrans == null ? "" : t.statusTrans(fmt(curTrans)) + " ";
-
-    document.getElementById("status-banner").innerHTML = `
-      <div class="status-banner" style="background:${bannerColor};border-color:${borderColor};color:${textColor}">
-        <span class="dot" style="background:${dotColor}"></span>
-        <span><strong>${t.statusLabel} (${curDate}):</strong>
-        ${chlStatus}. ${o2Status}${trStatus}
-        ${t.statusWinter}</span>
-      </div>`;
-
-    // ── Cards ───────────────────────────────────────────────────────────────
-    function card(type, title, value, unit, body) {
-      return `<div class="insight-card ${type}">
-        <h3>${title}</h3>
-        <div class="value">${value} <small>${unit}</small></div>
-        <p>${body}</p>
-      </div>`;
-    }
-
-    const timesAbove = worstChlVal ? Math.round(worstChlVal / CHLOROPHYLL_ALARM_UGL) : "?";
-    const worstYear4 = worstChl?.fecha?.slice(0, 4) ?? "";
-
-    const cards = [
-      card("alert",
-        t.worstTitle(worstYear4),
-        fmt(worstChlVal, 1), "µg/L",
-        t.worstBody(timesAbove, worstChlDate, fmt(minO2Val), minO2Date)
-      ),
-      card("good",
-        t.recovTitle(worstYear.year),
-        recoveryPct != null ? `−${recoveryPct} %` : "—", `vs. ${worstYear.year}`,
-        t.recovBody(
-          worstYear.year, fmt(worstYear.avg),
-          recentBest?.year, fmt(recentBest?.avg),
-          firstTransYear?.year, firstTransYear ? fmt(firstTransYear.avg, 1) : null,
-          lastTransYear?.year,  lastTransYear  ? fmt(lastTransYear.avg, 1)  : null,
-        )
-      ),
-      card("info",
-        t.chlTransTitle,
-        rChlTrans != null ? `r = ${fmt(rChlTrans, 2)}` : "—", "chl / transp.",
-        t.chlTransBody(
-          rChlTrans != null ? fmt(Math.abs(rChlTrans), 2) : "—",
-          curTrans != null ? fmt(curTrans, 1) : null
-        )
-      ),
-      card("info",
-        t.heatO2Title,
-        rTempO2 != null ? `r = ${fmt(rTempO2, 2)}` : "—", "temp / O₂",
-        t.heatO2Body(fmt(Math.abs(rTempO2 ?? 0), 2), fmt(minO2Val), minO2Date)
-      ),
-      card("info",
-        t.autumnTitle,
-        MONTH_NAMES[worstMonthIdx], "↑ chl",
-        t.autumnBody(MONTH_NAMES[worstMonthIdx], fmt(autumnMean, 1), fmt(summerMean, 1))
-      ),
-      card("warning",
-        t.nitratesTitle(maxNitDate),
-        fmt(maxNitVal, 2), "mg/L",
-        t.nitratesBody(nitMultiple != null ? nitMultiple + "×" : "—", fmt(avgNit, 2))
-      ),
-    ];
-
-    document.getElementById("insight-grid").innerHTML = cards.join("\n");
-  }
-</script>
 </body>
 </html>
