@@ -176,6 +176,42 @@ main {
 .lang-btn:hover { background: #1e293b; color: #e2e8f0; }
 .lang-btn.active { background: #38bdf8; color: #0f172a; border-color: #38bdf8; }
 
+/* ── Unmeasured section ── */
+.unmeasured-section {
+  max-width: 800px;
+  margin: 3rem auto 2rem;
+  padding: 2rem 2.5rem;
+  background: #0f172a;
+  border-left: 4px solid #ef4444;
+  border-radius: 8px;
+  color: #cbd5e1;
+}
+.unmeasured-section h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  margin-bottom: 1rem;
+}
+.unmeasured-section h3 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #ef4444;
+  margin-bottom: 1rem;
+}
+.unmeasured-section p {
+  font-size: 0.95rem;
+  line-height: 1.75;
+  margin-bottom: 0.9rem;
+}
+.unmeasured-section p:last-child { margin-bottom: 0; }
+.unmeasured-call-to-action {
+  font-weight: 600;
+  color: #f1f5f9;
+  font-style: italic;
+}
+
 footer {
   text-align: center;
   padding: 2rem 1.5rem;
