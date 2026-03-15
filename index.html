@@ -384,7 +384,7 @@
     });
 
     // Re-render dynamic content if data is loaded
-    if (store.params && store.aforos) {
+    if (store.params && store.aforos && store.precip !== null) {
       const lagoon = dedup(store.params);
       const allDates = [...lagoon.map(r => r.fecha), ...store.aforos.map(r => r.fecha)]
         .filter(Boolean).sort();
@@ -395,10 +395,10 @@
   }
 
   // ─── Data store ───────────────────────────────────────────────────────────
-  const store = { params: null, aforos: null };
+  const store = { params: null, aforos: null, precip: null };
 
   function tryRender() {
-    if (store.params !== null && store.aforos !== null) renderCharts();
+    if (store.params !== null && store.aforos !== null && store.precip !== null) renderCharts();
   }
 
   // ─── Load CSVs ────────────────────────────────────────────────────────────
@@ -425,6 +425,14 @@
     },
   });
 
+  Papa.parse("datos/precipitacion.csv", {
+    download: true,
+    header: true,
+    skipEmptyLines: true,
+    complete: ({ data }) => { store.precip = data; tryRender(); },
+    error: () => { store.precip = []; tryRender(); },  // graceful fallback if not yet generated
+  });
+
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
   function toNum(v) {
@@ -436,6 +444,12 @@
     // Returns a flat array for a dashed threshold line at y=value
     return dates.map(() => value);
   }
+
+  // Biological alert thresholds — change here to update charts + insights together
+  const CHLOROPHYLL_ALARM_UGL = 2;    // µg/L: ecological risk threshold
+  const CHLOROPHYLL_WARN_UGL  = 1.5;  // µg/L: early warning
+  const O2_CRITICAL_MGL       = 3;    // mg/L: hypoxia threshold
+  const O2_LOW_MGL            = 5;    // mg/L: below-optimal dissolved oxygen
 
   // Stores full unfiltered data and Chart.js instances for range updates
   const chartData = {};
@@ -515,7 +529,40 @@
   }
 
   function applyRange(id, months) {
-    const { dates, values, color, thresholdValue } = chartData[id];
+    const d = chartData[id];
+
+    // Mixed chart (Albujón: precipitation bars + nitrates line + chlorophyll line)
+    if (d.type === 'albujon') {
+      let dates, nitrates, precip, chlorophyll;
+      if (months === 0) {
+        dates       = d.dates;
+        nitrates    = d.nitrates;
+        precip      = d.precip;
+        chlorophyll = d.chlorophyll;
+      } else {
+        const cutoff = new Date();
+        cutoff.setMonth(cutoff.getMonth() - months);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        const pairs = d.dates
+          .map((dt, i) => [dt, d.nitrates[i], d.precip[i], d.chlorophyll[i]])
+          .filter(([dt]) => dt >= cutoffStr);
+        dates       = pairs.map(p => p[0]);
+        nitrates    = pairs.map(p => p[1]);
+        precip      = pairs.map(p => p[2]);
+        chlorophyll = pairs.map(p => p[3]);
+      }
+      const chart = chartInstances[id];
+      chart.data.labels           = dates;
+      chart.data.datasets[0].data = precip;       // bar dataset (index 0)
+      chart.data.datasets[1].data = nitrates;     // line dataset (index 1)
+      chart.data.datasets[2].data = chlorophyll;  // line dataset (index 2)
+      chart.update();
+      document.querySelectorAll(`.range-selector[data-chart="${id}"] .range-btn`)
+        .forEach(btn => btn.classList.toggle("active", +btn.dataset.months === months));
+      return;
+    }
+
+    const { dates, values, color, thresholdValue } = d;
 
     let slicedDates, slicedValues;
     if (months === 0) {
@@ -526,8 +573,8 @@
       cutoff.setMonth(cutoff.getMonth() - months);
       const cutoffStr = cutoff.toISOString().slice(0, 10);
       const pairs = dates
-        .map((d, i) => [d, values[i]])
-        .filter(([d]) => d >= cutoffStr);
+        .map((dt, i) => [dt, values[i]])
+        .filter(([dt]) => dt >= cutoffStr);
       slicedDates  = pairs.map(p => p[0]);
       slicedValues = pairs.map(p => p[1]);
     }
@@ -543,6 +590,111 @@
     // Highlight the active button
     document.querySelectorAll(`.range-selector[data-chart="${id}"] .range-btn`)
       .forEach(btn => btn.classList.toggle("active", +btn.dataset.months === months));
+  }
+
+  // ─── Albujón mixed chart: nitrates (line) + precipitation (bars) ───────────
+
+  // Sum precipitation over the 7 days ending on each aforos sample date.
+  // This provides the "rainfall context" for each nitrate measurement.
+  function buildWeeklyPrecip(afDates, precipByDate) {
+    return afDates.map(fecha => {
+      let sum = 0, hasData = false;
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(fecha + 'T12:00:00Z');
+        d.setDate(d.getDate() - i);
+        const key = d.toISOString().slice(0, 10);
+        const v = precipByDate[key];
+        if (v != null) { sum += v; hasData = true; }
+      }
+      return hasData ? sum : null;
+    });
+  }
+
+  function makeAlbujonChart(id, dates, nitrates, precip, chlorophyll) {
+    chartData[id] = { type: 'albujon', dates, nitrates, precip, chlorophyll };
+
+    const canvas = document.getElementById(id);
+    const selector = document.createElement("div");
+    selector.className = "range-selector";
+    selector.dataset.chart = id;
+    RANGES.forEach(({ label: lbl, months }) => {
+      const btn = document.createElement("button");
+      btn.className = "range-btn" + (months === 0 ? " active" : "");
+      btn.textContent = months === 0 ? T[lang].rangeAll : lbl;
+      btn.dataset.months = months;
+      btn.addEventListener("click", () => applyRange(id, months));
+      selector.appendChild(btn);
+    });
+    canvas.parentNode.insertBefore(selector, canvas);
+
+    chartInstances[id] = new Chart(canvas, {
+      data: {
+        labels: dates,
+        datasets: [
+          {
+            type: 'bar',
+            label: '7-day rainfall (mm)',
+            data: precip,
+            backgroundColor: '#94a3b833',
+            borderColor: '#94a3b855',
+            borderWidth: 1,
+            yAxisID: 'yPrecip',
+            order: 3,
+          },
+          {
+            type: 'line',
+            label: 'Nitrates (mg/L)',
+            data: nitrates,
+            borderColor: '#f97316',
+            backgroundColor: '#f9731622',
+            borderWidth: 2,
+            pointRadius: 3,
+            tension: 0.3,
+            fill: false,
+            spanGaps: true,
+            yAxisID: 'yNitrates',
+            order: 1,
+          },
+          {
+            type: 'line',
+            label: 'Chlorophyll (µg/L)',
+            data: chlorophyll,
+            borderColor: '#22c55e',
+            backgroundColor: '#22c55e22',
+            borderWidth: 2,
+            pointRadius: 2,
+            tension: 0.3,
+            fill: false,
+            spanGaps: true,
+            yAxisID: 'yNitrates',
+            order: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+          tooltip: { mode: 'index', intersect: false },
+        },
+        scales: {
+          x: { ticks: { maxTicksLimit: 10, maxRotation: 0 } },
+          yNitrates: {
+            type: 'linear',
+            position: 'left',
+            beginAtZero: false,
+            title: { display: true, text: 'Nitrates (mg/L) · Chlorophyll (µg/L)', font: { size: 11 } },
+          },
+          yPrecip: {
+            type: 'linear',
+            position: 'right',
+            beginAtZero: true,
+            grid: { drawOnChartArea: false },
+            title: { display: true, text: 'Rainfall 7d (mm)', font: { size: 11 } },
+          },
+        },
+      },
+    });
   }
 
   // ─── Render all charts ────────────────────────────────────────────────────
@@ -578,7 +730,7 @@
       lagoonDates,
       lagoon.map(r => toNum(r.clorofila_ug_l)),
       "#22c55e",
-      2,
+      CHLOROPHYLL_ALARM_UGL,
     );
 
     makeChart(
@@ -587,7 +739,7 @@
       lagoonDates,
       lagoon.map(r => toNum(r.oxigeno_mg_l)),
       "#3b82f6",
-      3,
+      O2_CRITICAL_MGL,
     );
 
     makeChart(
@@ -598,13 +750,32 @@
       "#06b6d4",
     );
 
-    makeChart(
-      "chart-nitratos",
-      "Nitrates (mg/L)",
-      aforos.map(r => r.fecha),
-      aforos.map(r => toNum(r.nitratos_mg_l)),
-      "#f97316",
-    );
+    // Build precipitation lookup (date → mm) for the Albujón mixed chart
+    const precipByDate = {};
+    for (const r of store.precip) {
+      const v = toNum(r.prec_mm);
+      if (v !== null) precipByDate[r.fecha] = v;
+    }
+
+    // Build chlorophyll lookup (date → µg/L) from deduplicated lagoon data
+    const chlByDate = {};
+    for (const r of lagoon) {
+      const v = toNum(r.clorofila_ug_l);
+      if (v !== null) chlByDate[r.fecha] = v;
+    }
+
+    // Merge aforos and lagoon dates into a single sorted axis
+    const mergedDates = [...new Set([
+      ...aforos.map(r => r.fecha),
+      ...Object.keys(chlByDate),
+    ])].sort();
+
+    const nitMap  = Object.fromEntries(aforos.map(r => [r.fecha, toNum(r.nitratos_mg_l)]));
+    const mergedNitrates    = mergedDates.map(d => nitMap[d]    ?? null);
+    const mergedChl         = mergedDates.map(d => chlByDate[d] ?? null);
+    const mergedPrecip      = buildWeeklyPrecip(mergedDates, precipByDate);
+
+    makeAlbujonChart("chart-nitratos", mergedDates, mergedNitrates, mergedPrecip, mergedChl);
 
     // Last updated: most recent date across both datasets
     const allDates = [
@@ -731,18 +902,18 @@
 
     // ── Status banner ───────────────────────────────────────────────────────
     let bannerColor = "#f0fdf4"; let dotColor = "#22c55e"; let borderColor = "#bbf7d0"; let textColor = "#166534";
-    if (curChl != null && curChl >= 2) {
+    if (curChl != null && curChl >= CHLOROPHYLL_ALARM_UGL) {
       bannerColor = "#fef2f2"; dotColor = "#ef4444"; borderColor = "#fecaca"; textColor = "#991b1b";
-    } else if (curChl != null && curChl >= 1.5) {
+    } else if (curChl != null && curChl >= CHLOROPHYLL_WARN_UGL) {
       bannerColor = "#fffbeb"; dotColor = "#f59e0b"; borderColor = "#fde68a"; textColor = "#92400e";
     }
 
     const t = T[lang];
     const chlStatus = curChl == null ? "—"
-      : curChl >= 2   ? t.statusChlAbove(fmt(curChl))
-      : curChl >= 1.5 ? t.statusChlNear(fmt(curChl))
+      : curChl >= CHLOROPHYLL_ALARM_UGL ? t.statusChlAbove(fmt(curChl))
+      : curChl >= CHLOROPHYLL_WARN_UGL  ? t.statusChlNear(fmt(curChl))
       : t.statusChlHealthy(fmt(curChl));
-    const o2Status  = curO2  == null ? "" : (curO2 < 3 ? t.statusO2Critical(fmt(curO2)) : curO2 < 5 ? t.statusO2Low(fmt(curO2)) : t.statusO2Healthy(fmt(curO2))) + " ";
+    const o2Status  = curO2  == null ? "" : (curO2 < O2_CRITICAL_MGL ? t.statusO2Critical(fmt(curO2)) : curO2 < O2_LOW_MGL ? t.statusO2Low(fmt(curO2)) : t.statusO2Healthy(fmt(curO2))) + " ";
     const trStatus  = curTrans == null ? "" : t.statusTrans(fmt(curTrans)) + " ";
 
     document.getElementById("status-banner").innerHTML = `
@@ -762,7 +933,7 @@
       </div>`;
     }
 
-    const timesAbove = worstChlVal ? Math.round(worstChlVal / 2) : "?";
+    const timesAbove = worstChlVal ? Math.round(worstChlVal / CHLOROPHYLL_ALARM_UGL) : "?";
     const worstYear4 = worstChl?.fecha?.slice(0, 4) ?? "";
 
     const cards = [

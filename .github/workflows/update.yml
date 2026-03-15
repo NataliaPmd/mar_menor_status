@@ -26,14 +26,17 @@ jobs:
 
       - name: Run scraper
         run: python scraper.py
-        # If the scraper exits with a non-zero code the job fails
-        # and the error is visible in the Actions log.
+        env:
+          AEMET_API_KEY: ${{ secrets.AEMET_API_KEY }}
+        # AEMET_API_KEY must be added as a repository secret.
+        # Get a free key at https://opendata.aemet.es
+        # If the key is not set, the AEMET source is skipped and other sources continue.
 
       - name: Commit and push updated CSVs
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add datos/parametros.csv datos/aforos.csv
+          git add datos/parametros.csv datos/aforos.csv datos/precipitacion.csv
           # Only commit when there are actual changes to avoid empty commits
           git diff --cached --quiet || git commit -m "data: automated update $(date -u +%Y-%m-%d)"
           git push

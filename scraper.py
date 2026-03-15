@@ -18,6 +18,7 @@ import os
 import re
 import sqlite3
 import tempfile
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -65,6 +66,13 @@ PARAM_KEYWORDS = {
     "transparencia":  "transparencia_m",
 }
 
+# Allowed column names for parametros_laguna — used to validate f-string SQL
+# so that an unexpected dict key can never produce a malformed SQL statement.
+_LAGUNA_COLS = frozenset({
+    "temperatura", "salinidad", "clorofila_ug_l",
+    "oxigeno_mg_l", "turbidez_ftu", "transparencia_m",
+})
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def parse_float(s: str) -> Optional[float]:
@@ -84,6 +92,17 @@ def parse_float(s: str) -> Optional[float]:
         return float(s)
     except ValueError:
         return None
+
+
+def _safe_col(col: str) -> str:
+    """Return col if it is in _LAGUNA_COLS, else raise ValueError.
+
+    Called before every f-string column interpolation in SQL to prevent
+    an unexpected key from producing a malformed or injected statement.
+    """
+    if col not in _LAGUNA_COLS:
+        raise ValueError(f"Unexpected parametros_laguna column: {col!r}")
+    return col
 
 
 def spanish_date_to_iso(day_month: str, year_hint: int) -> Optional[str]:
@@ -113,6 +132,25 @@ def spanish_date_to_iso(day_month: str, year_hint: int) -> Optional[str]:
         return date(year, month_num, day).isoformat()
     except ValueError:
         return None
+
+
+def _download_pdf(url: str, dest: Path, tag: str) -> bool:
+    """Download url to dest if dest does not already exist.
+
+    Returns True on success (or if already cached), False on failure.
+    Logs a warning and returns False on any network error so callers
+    can skip the file and continue with the rest.
+    """
+    if dest.exists():
+        return True
+    try:
+        r = requests.get(url, timeout=120)
+        r.raise_for_status()
+        dest.write_bytes(r.content)
+        return True
+    except requests.RequestException as e:
+        log.warning("[%s] Failed to download %s: %s", tag, url, e)
+        return False
 
 
 def get_db() -> sqlite3.Connection:
@@ -173,6 +211,19 @@ def seed_from_csv(conn: sqlite3.Connection):
         conn.commit()
         log.info("Seeded aforos_albujon from %s", aforos_csv)
 
+    precip_csv = DATA_DIR / "precipitacion.csv"
+    if precip_csv.exists():
+        with open(precip_csv, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                conn.execute(
+                    """INSERT OR IGNORE INTO precipitacion_aemet
+                       (fecha, estacion, prec_mm)
+                       VALUES (:fecha, :estacion, :prec_mm)""",
+                    row,
+                )
+        conn.commit()
+        log.info("Seeded precipitacion_aemet from %s", precip_csv)
+
 
 # ─── Source 1: HTML monitoring table ──────────────────────────────────────────
 
@@ -232,27 +283,21 @@ def scrape_html_table(conn: sqlite3.Connection) -> dict:
     year1 = year1 or date.today().year
     year2 = year2 or (year1 - 1)
 
-    # Remove stale html records so values don't accumulate incorrectly
-    conn.execute("DELETE FROM parametros_laguna WHERE fuente = 'html'")
-    conn.commit()
+    # Collect all (col, iso_date, value) tuples during parsing.
+    # The DELETE + bulk insert is done atomically afterwards so that a
+    # parse failure mid-way cannot leave the DB with missing html rows.
+    pending: list[tuple[str, str, float]] = []
 
-    def _flush(col, dates, values, year):
-        """Insert (date, value) pairs for a single parameter/zone."""
+    def _collect(col, dates, values, year) -> int:
+        """Append (col, iso, val) tuples to pending; return count added."""
+        safe = _safe_col(col)
         count = 0
         for d_str, v_str in zip(dates, values):
             iso = spanish_date_to_iso(d_str, year)
             val = parse_float(v_str)          # '-' returns None
             if iso is None or val is None:
                 continue
-            conn.execute(
-                "INSERT OR IGNORE INTO parametros_laguna (fecha, fuente) VALUES (?, 'html')",
-                (iso,),
-            )
-            conn.execute(
-                f"UPDATE parametros_laguna SET {col} = ? "
-                f"WHERE fecha = ? AND fuente = 'html' AND {col} IS NULL",
-                (val, iso),
-            )
+            pending.append((safe, iso, val))
             count += 1
         return count
 
@@ -276,17 +321,16 @@ def scrape_html_table(conn: sqlite3.Connection) -> dict:
                     break
 
         if matched_col:
-            # Flush the previous parameter before starting a new one
+            # Collect the previous parameter before starting a new one
             if col_name:
-                inserted += _flush(col_name, dates1, values1, year1)
-                inserted += _flush(col_name, dates2, values2, year2)
-                conn.commit()
+                inserted += _collect(col_name, dates1, values1, year1)
+                inserted += _collect(col_name, dates2, values2, year2)
             col_name = matched_col
             dates1, values1, dates2, values2 = [], [], [], []
             zone = 1
             continue
 
-        if col_name == 0:
+        if col_name is None:
             continue  # not yet inside a parameter block
 
         if line == "Todos los datos":
@@ -307,11 +351,25 @@ def scrape_html_table(conn: sqlite3.Connection) -> dict:
             elif zone == 2 and len(values2) < 4:
                 values2.append(line)
 
-    # Flush the last parameter
+    # Collect the last parameter
     if col_name:
-        inserted += _flush(col_name, dates1, values1, year1)
-        inserted += _flush(col_name, dates2, values2, year2)
-        conn.commit()
+        inserted += _collect(col_name, dates1, values1, year1)
+        inserted += _collect(col_name, dates2, values2, year2)
+
+    # Atomically replace all html records: delete stale rows and insert fresh
+    # ones in a single transaction so a partial failure cannot leave the DB empty.
+    with conn:
+        conn.execute("DELETE FROM parametros_laguna WHERE fuente = 'html'")
+        for safe, iso, val in pending:
+            conn.execute(
+                "INSERT OR IGNORE INTO parametros_laguna (fecha, fuente) VALUES (?, 'html')",
+                (iso,),
+            )
+            conn.execute(
+                f"UPDATE parametros_laguna SET {safe} = ? "
+                f"WHERE fecha = ? AND fuente = 'html' AND {safe} IS NULL",
+                (val, iso),
+            )
 
     log.info("[html] Inserted %d parameter values (year1=%d, year2=%d)", inserted, year1, year2)
     return {"source": "html", "new_records": inserted, "error": None}
@@ -414,14 +472,8 @@ def scrape_imida_pdfs(conn: sqlite3.Connection) -> dict:
         log.info("[imida] Downloading %s", url)
 
         pdf_path = PDF_DIR / f"Informe_imida_{iso_date}.pdf"
-        if not pdf_path.exists():
-            try:
-                r = requests.get(url, timeout=120)
-                r.raise_for_status()
-                pdf_path.write_bytes(r.content)
-            except requests.RequestException as e:
-                log.warning("[imida] Failed to download %s: %s", url, e)
-                continue
+        if not _download_pdf(url, pdf_path, "imida"):
+            continue
 
         inserted = _parse_imida_pdf(conn, pdf_path, iso_date)
         total_inserted += inserted
@@ -431,7 +483,115 @@ def scrape_imida_pdfs(conn: sqlite3.Connection) -> dict:
     return {"source": "imida", "new_records": total_inserted, "error": None}
 
 
-# ─── Source 4 (bis): UPCT historical CSVs ────────────────────────────────────
+# ─── Source 4: AEMET daily precipitation ─────────────────────────────────────
+
+AEMET_BASE          = "https://opendata.aemet.es/opendata/api"
+AEMET_STATION       = "7031"          # San Javier Aeropuerto, closest station to Mar Menor
+AEMET_HISTORY_START = date(2020, 1, 1)  # Start of the historical precipitation record
+
+
+def scrape_aemet_precipitation(conn: sqlite3.Connection) -> dict:
+    """Download daily precipitation from AEMET OpenData API.
+
+    Station 7031 is San Javier Aeropuerto, closest station to Mar Menor.
+    The API is limited to 31 days per request, so we iterate month by month
+    from 2020 to today. Already-loaded months are skipped. Requires the
+    AEMET_API_KEY environment variable.
+
+    Precipitation codes:
+      'Ip' = inapreciable (trace, < 0.1 mm) → stored as 0.0
+      ''   = no observation for that day    → stored as NULL
+    """
+    import calendar
+
+    api_key = os.environ.get("AEMET_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "AEMET_API_KEY environment variable not set. "
+            "Get a free key at https://opendata.aemet.es"
+        )
+
+    today = date.today()
+    total_inserted = 0
+
+    # Build list of (period_start, period_end) month windows from history start to today
+    months = []
+    cur = AEMET_HISTORY_START
+    while cur <= today:
+        last_day_num = calendar.monthrange(cur.year, cur.month)[1]
+        period_end   = min(date(cur.year, cur.month, last_day_num), today)
+        months.append((cur, period_end))
+        cur = date(cur.year + (cur.month == 12), (cur.month % 12) + 1, 1)
+
+    for period_start, period_end in months:
+        # Skip months already fully loaded (check last day of period)
+        if conn.execute(
+            "SELECT 1 FROM precipitacion_aemet WHERE fecha = ? AND estacion = ?",
+            (period_end.isoformat(), AEMET_STATION),
+        ).fetchone():
+            continue
+
+        ini = period_start.strftime("%Y-%m-%dT00:00:00UTC")
+        fin = period_end.strftime("%Y-%m-%dT23:59:59UTC")
+        url = (
+            f"{AEMET_BASE}/valores/climatologicos/diarios/datos"
+            f"/fechaini/{ini}/fechafin/{fin}/estacion/{AEMET_STATION}"
+        )
+        log.info("[aemet] Requesting %s – %s", period_start, period_end)
+
+        try:
+            resp = requests.get(url, params={"api_key": api_key}, timeout=30)
+            resp.raise_for_status()
+            meta = resp.json()
+        except (requests.RequestException, ValueError) as e:
+            log.warning("[aemet] Failed to fetch %s: %s", period_start, e)
+            time.sleep(2)
+            continue
+
+        if meta.get("estado") != 200:
+            log.warning("[aemet] %s for %s: %s",
+                        meta.get("estado"), period_start, meta.get("descripcion"))
+            time.sleep(2)
+            continue
+
+        datos_url = meta.get("datos")
+        try:
+            records = requests.get(datos_url, timeout=30).json()
+        except (requests.RequestException, ValueError) as e:
+            log.warning("[aemet] Failed to fetch data for %s: %s", period_start, e)
+            time.sleep(2)
+            continue
+
+        inserted = 0
+        for rec in records:
+            fecha    = rec.get("fecha")
+            prec_raw = rec.get("prec", "")
+            if not fecha:
+                continue
+            if prec_raw in ("", None):
+                prec_mm = None
+            elif str(prec_raw).strip().lower() == "ip":
+                prec_mm = 0.0   # inapreciable (trace amount)
+            else:
+                prec_mm = parse_float(str(prec_raw))
+
+            rows = conn.execute(
+                "INSERT OR IGNORE INTO precipitacion_aemet (fecha, estacion, prec_mm) VALUES (?, ?, ?)",
+                (fecha, AEMET_STATION, prec_mm),
+            ).rowcount
+            inserted += rows
+
+        conn.commit()
+        log.info("[aemet] %d-%02d: %d new records", period_start.year, period_start.month, inserted)
+        total_inserted += inserted
+
+        # Respect AEMET rate limit (~30 req/min = 1 req/2s)
+        time.sleep(2)
+
+    return {"source": "aemet", "new_records": total_inserted, "error": None}
+
+
+# ─── Source 5: UPCT historical CSVs (2016–2024) ──────────────────────────────
 
 # Maps UPCT variable names to DB column names.
 # Transparencia values are stored as negative depths; we take abs().
@@ -476,17 +636,13 @@ def scrape_upct_csvs(conn: sqlite3.Connection) -> dict:
                 continue
             raw_date, raw_val = parts[0].strip(), parts[1].strip()
 
-            # Normalise date: YYYY/MM/DD or YYYY/M/D → YYYY-MM-DD
+            # Normalise date: YYYY/MM/DD → YYYY-MM-DD
             try:
                 d = datetime.strptime(raw_date, "%Y/%m/%d")
                 iso_date = d.strftime("%Y-%m-%d")
             except ValueError:
-                try:
-                    d = datetime.strptime(raw_date, "%Y/%m/%d")
-                    iso_date = d.strftime("%Y-%m-%d")
-                except ValueError:
-                    log.debug("[upct] Unparseable date: %r", raw_date)
-                    continue
+                log.debug("[upct] Unparseable date: %r", raw_date)
+                continue
 
             val = parse_float(raw_val)
             if val is None:
@@ -498,9 +654,10 @@ def scrape_upct_csvs(conn: sqlite3.Connection) -> dict:
                 "INSERT OR IGNORE INTO parametros_laguna (fecha, fuente) VALUES (?, 'upct')",
                 (iso_date,),
             )
+            safe = _safe_col(col_name)
             rows = conn.execute(
-                f"UPDATE parametros_laguna SET {col_name} = ? "
-                f"WHERE fecha = ? AND fuente = 'upct' AND {col_name} IS NULL",
+                f"UPDATE parametros_laguna SET {safe} = ? "
+                f"WHERE fecha = ? AND fuente = 'upct' AND {safe} IS NULL",
                 (val, iso_date),
             ).rowcount
             inserted += rows
@@ -512,7 +669,7 @@ def scrape_upct_csvs(conn: sqlite3.Connection) -> dict:
     return {"source": "upct", "new_records": total_inserted, "error": None}
 
 
-# ─── Source 5: Albujón flow PDFs ──────────────────────────────────────────────
+# ─── Source 6: Albujón flow PDFs ──────────────────────────────────────────────
 
 def scrape_aforos_pdfs(conn: sqlite3.Connection) -> dict:
     """Scrape and parse Rambla del Albujón nitrate lab PDFs.
@@ -552,14 +709,8 @@ def scrape_aforos_pdfs(conn: sqlite3.Connection) -> dict:
         log.info("[aforos] Downloading %s", url)
 
         pdf_path = PDF_DIR / f"aforos_{iso_date}.pdf"
-        if not pdf_path.exists():
-            try:
-                r = requests.get(url, timeout=60)
-                r.raise_for_status()
-                pdf_path.write_bytes(r.content)
-            except requests.RequestException as e:
-                log.warning("[aforos] Failed to download %s: %s", url, e)
-                continue
+        if not _download_pdf(url, pdf_path, "aforos"):
+            continue
 
         inserted = _parse_aforos_pdf(conn, pdf_path, iso_date)
         total_inserted += inserted
@@ -616,8 +767,9 @@ def _parse_laguna_pdf(
         (report_date, source),
     )
     for col, val in row_data.items():
+        safe = _safe_col(col)
         conn.execute(
-            f"UPDATE parametros_laguna SET {col} = ? WHERE fecha = ? AND fuente = ? AND {col} IS NULL",
+            f"UPDATE parametros_laguna SET {safe} = ? WHERE fecha = ? AND fuente = ? AND {safe} IS NULL",
             (val, report_date, source),
         )
     conn.commit()
@@ -711,8 +863,9 @@ def _parse_imida_pdf(conn: sqlite3.Connection, pdf_path: Path, report_date: str)
         (report_date,),
     )
     for col, val in row_data.items():
+        safe = _safe_col(col)
         conn.execute(
-            f"UPDATE parametros_laguna SET {col} = ? WHERE fecha = ? AND fuente = 'imida' AND {col} IS NULL",
+            f"UPDATE parametros_laguna SET {safe} = ? WHERE fecha = ? AND fuente = 'imida' AND {safe} IS NULL",
             (val, report_date),
         )
     conn.commit()
@@ -810,6 +963,18 @@ def export_csv(conn: sqlite3.Connection):
             writer.writerow([row[k] if row[k] is not None else "" for k in row.keys()])
     log.info("Exported %d rows to %s", len(rows), aforos_path)
 
+    # Export precipitacion_aemet
+    precip_path = DATA_DIR / "precipitacion.csv"
+    rows = conn.execute(
+        "SELECT fecha, estacion, prec_mm FROM precipitacion_aemet ORDER BY fecha ASC"
+    ).fetchall()
+    with open(precip_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["fecha", "estacion", "prec_mm"])
+        for row in rows:
+            writer.writerow([row[k] if row[k] is not None else "" for k in row.keys()])
+    log.info("Exported %d rows to %s", len(rows), precip_path)
+
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -822,7 +987,8 @@ def main():
 
     # Run each scraper independently; failures do not abort the others
     scrapers = [
-        ("upct",   scrape_upct_csvs),     # historical 2016–2024 (run first so newer sources can overwrite)
+        ("upct",   scrape_upct_csvs),           # historical 2016–2024 (run first so newer sources can overwrite)
+        ("aemet",  scrape_aemet_precipitation),  # daily precipitation from AEMET
         ("html",   scrape_html_table),
         ("cdg",    scrape_cdg_pdf),
         ("imida",  scrape_imida_pdfs),
