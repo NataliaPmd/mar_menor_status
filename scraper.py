@@ -378,25 +378,41 @@ def scrape_html_table(conn: sqlite3.Connection) -> dict:
 # ─── Source 2: CdG weekly PDFs ────────────────────────────────────────────────
 
 def scrape_cdg_pdf(conn: sqlite3.Connection) -> dict:
-    """Download and parse the most recent CdG weekly PDF report.
+    """Download and parse all missing CdG weekly PDF reports.
 
-    Tries the last 10 days in reverse order. Stops at the first
-    PDF that exists and can be parsed.
+    Scans every day from the day after the last CdG date already in the DB
+    (or 2025-04-29 as a safe backfill floor) up to today. Downloads any PDF
+    that exists and hasn't been processed yet. This handles both backfill and
+    ongoing weekly updates in one pass.
     """
     base_url = "https://canalmarmenor.carm.es/wp-content/uploads/Informe_CdG_{DD}_{MM}_{YYYY}.pdf"
     today = date.today()
 
-    pdf_path = None
-    report_date = None
+    # Dates already in DB — skip them individually so gaps are filled
+    existing_dates = {
+        row[0]
+        for row in conn.execute(
+            "SELECT fecha FROM parametros_laguna WHERE fuente = 'cdg'"
+        ).fetchall()
+    }
 
-    for delta in range(10):
-        candidate = today - timedelta(days=delta)
+    # Always scan from the known backfill floor so gaps in the middle are caught
+    scan_from = date(2025, 4, 29)
+    log.info("[cdg] Scanning for PDFs from %s to %s", scan_from, today)
+
+    total_inserted = 0
+    candidate = scan_from
+    while candidate <= today:
+        iso = candidate.isoformat()
+        if iso in existing_dates:
+            candidate += timedelta(days=1)
+            continue
+
         url = base_url.format(
             DD=candidate.strftime("%d"),
             MM=candidate.strftime("%m"),
             YYYY=candidate.strftime("%Y"),
         )
-        log.info("[cdg] Checking %s", url)
         try:
             head = requests.head(url, timeout=10)
             if head.status_code == 200:
@@ -405,26 +421,20 @@ def scrape_cdg_pdf(conn: sqlite3.Connection) -> dict:
                 resp.raise_for_status()
                 pdf_path = PDF_DIR / f"Informe_CdG_{candidate.isoformat()}.pdf"
                 pdf_path.write_bytes(resp.content)
-                report_date = candidate.isoformat()
-                break
+                try:
+                    inserted = _parse_laguna_pdf(conn, pdf_path, iso, "cdg")
+                    log.info("[cdg] Inserted %d records for %s", inserted, candidate)
+                    total_inserted += inserted
+                except RuntimeError as parse_err:
+                    log.warning("[cdg] Skipping %s — parse failed: %s", iso, parse_err)
         except requests.RequestException as e:
             log.warning("[cdg] Request error for %s: %s", url, e)
 
-    if pdf_path is None:
-        raise RuntimeError("No CdG PDF found in the last 10 days")
+        candidate += timedelta(days=1)
 
-    # Check if we already have this date in the DB
-    existing = conn.execute(
-        "SELECT id FROM parametros_laguna WHERE fecha = ? AND fuente = 'cdg'",
-        (report_date,),
-    ).fetchone()
-    if existing:
-        log.info("[cdg] Date %s already in DB, skipping", report_date)
-        return {"source": "cdg", "new_records": 0, "error": None}
-
-    inserted = _parse_laguna_pdf(conn, pdf_path, report_date, "cdg")
-    log.info("[cdg] Inserted %d records for %s", inserted, report_date)
-    return {"source": "cdg", "new_records": inserted, "error": None}
+    if total_inserted == 0:
+        log.info("[cdg] No new PDFs found")
+    return {"source": "cdg", "new_records": total_inserted, "error": None}
 
 
 # ─── Source 3: IMIDA weekly PDFs ──────────────────────────────────────────────
