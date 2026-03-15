@@ -26,7 +26,7 @@ function makeChart(id, label, dates, values, color, thresholdValue = null) {
   selector.dataset.chart = id;
   RANGES.forEach(({ label: lbl, months }) => {
     const btn = document.createElement("button");
-    btn.className = "range-btn" + (months === 0 ? " active" : "");
+    btn.className = "range-btn" + (months === 12 ? " active" : "");
     btn.textContent = months === 0 ? T[lang].rangeAll : lbl;
     btn.dataset.months = months;
     btn.addEventListener("click", () => applyRange(id, months));
@@ -52,6 +52,9 @@ function makeChart(id, label, dates, values, color, thresholdValue = null) {
       },
     },
   });
+
+  // Default view: last 12 months
+  applyRange(id, 12);
 }
 
 function buildDatasets(dates, values, color, thresholdValue) {
@@ -170,7 +173,7 @@ function makeAlbujonChart(id, dates, nitrates, precip, chlorophyll) {
   selector.dataset.chart = id;
   RANGES.forEach(({ label: lbl, months }) => {
     const btn = document.createElement("button");
-    btn.className = "range-btn" + (months === 0 ? " active" : "");
+    btn.className = "range-btn" + (months === 12 ? " active" : "");
     btn.textContent = months === 0 ? T[lang].rangeAll : lbl;
     btn.dataset.months = months;
     btn.addEventListener("click", () => applyRange(id, months));
@@ -246,4 +249,7 @@ function makeAlbujonChart(id, dates, nitrates, precip, chlorophyll) {
       },
     },
   });
+
+  // Default view: last 12 months
+  applyRange(id, 12);
 }
